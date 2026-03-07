@@ -76,7 +76,7 @@ function exportCSV(data: ReturnType<typeof useMetrics>['data']) {
 }
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
-const ResultIcon = () => (
+const LeadIcon = () => (
   <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="#22c55e" strokeWidth={2}>
     <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
   </svg>
@@ -96,15 +96,28 @@ const ImpressionsIcon = () => (
   </svg>
 );
 
-const ClickIcon = () => (
+const VideoIcon = () => (
   <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="#f59e0b" strokeWidth={2}>
     <path strokeLinecap="round" strokeLinejoin="round"
-      d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122" />
+      d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+    <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+  </svg>
+);
+
+const FollowerIcon = () => (
+  <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="#ec4899" strokeWidth={2}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+  </svg>
+);
+
+const CostIcon = () => (
+  <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="#06b6d4" strokeWidth={2}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
   </svg>
 );
 
 const ReachIcon = () => (
-  <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="#ec4899" strokeWidth={2}>
+  <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="#8b5cf6" strokeWidth={2}>
     <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
   </svg>
 );
@@ -150,48 +163,86 @@ export default function DashboardPage() {
 
       <main className="flex-1 p-4 md:p-6 flex flex-col gap-5 max-w-screen-2xl mx-auto w-full">
 
-        {/* ── KPI Row ── */}
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-          <KpiCard
-            title="Resultados"
-            value={formatKpiValue('results', data?.kpis.total_results ?? 0)}
-            change={data?.kpis.results_change ?? 0}
-            icon={<ResultIcon />}
-            iconBg="rgba(34,197,94,0.12)"
-            loading={loading}
-          />
-          <KpiCard
-            title="Invertido (COP)"
-            value={formatKpiValue('spent', data?.kpis.total_spent ?? 0)}
-            change={data?.kpis.spent_change ?? 0}
-            icon={<BudgetIcon />}
-            iconBg="rgba(168,85,247,0.12)"
-            loading={loading}
-          />
-          <KpiCard
-            title="Impresiones"
-            value={formatKpiValue('imp', data?.kpis.total_impressions ?? 0)}
-            change={data?.kpis.impressions_change ?? 0}
-            icon={<ImpressionsIcon />}
-            iconBg="rgba(59,130,246,0.12)"
-            loading={loading}
-          />
-          <KpiCard
-            title="Clics"
-            value={formatKpiValue('clicks', data?.kpis.total_clicks ?? 0)}
-            change={data?.kpis.clicks_change ?? 0}
-            icon={<ClickIcon />}
-            iconBg="rgba(245,158,11,0.12)"
-            loading={loading}
-          />
-          <KpiCard
-            title="Alcance"
-            value={formatKpiValue('reach', data?.kpis.total_reach ?? 0)}
-            change={data?.kpis.reach_change ?? 0}
-            icon={<ReachIcon />}
-            iconBg="rgba(236,72,153,0.12)"
-            loading={loading}
-          />
+        {/* ── KPI Row — Conversiones (SOLO WA/leads) ── */}
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-widest text-[var(--text-muted)] mb-2 px-0.5">
+            Conversiones reales
+          </p>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <KpiCard
+              title="Leads / WhatsApp"
+              value={formatKpiValue('results', data?.kpis.total_leads ?? 0)}
+              change={data?.kpis.leads_change ?? 0}
+              icon={<LeadIcon />}
+              iconBg="rgba(34,197,94,0.12)"
+              loading={loading}
+            />
+            <KpiCard
+              title="Invertido (COP)"
+              value={formatKpiValue('spent', data?.kpis.total_spent ?? 0)}
+              change={data?.kpis.spent_change ?? 0}
+              icon={<BudgetIcon />}
+              iconBg="rgba(168,85,247,0.12)"
+              loading={loading}
+            />
+            <KpiCard
+              title="Costo por Lead"
+              value={formatKpiValue('spent', data?.kpis.total_costo_por_lead ?? 0)}
+              change={-(data?.kpis.leads_change ?? 0)}
+              icon={<CostIcon />}
+              iconBg="rgba(6,182,212,0.12)"
+              loading={loading}
+            />
+            <KpiCard
+              title="Alcance"
+              value={formatKpiValue('reach', data?.kpis.total_reach ?? 0)}
+              change={data?.kpis.reach_change ?? 0}
+              icon={<ReachIcon />}
+              iconBg="rgba(139,92,246,0.12)"
+              loading={loading}
+            />
+          </div>
+        </div>
+
+        {/* ── KPI Row — Otras métricas ── */}
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-widest text-[var(--text-muted)] mb-2 px-0.5">
+            Otras métricas de campaña
+          </p>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <KpiCard
+              title="Vistas de Video"
+              value={formatKpiValue('results', data?.kpis.total_video_views ?? 0)}
+              change={data?.kpis.video_views_change ?? 0}
+              icon={<VideoIcon />}
+              iconBg="rgba(245,158,11,0.12)"
+              loading={loading}
+            />
+            <KpiCard
+              title="Seguidores / Me gusta"
+              value={formatKpiValue('results', data?.kpis.total_followers ?? 0)}
+              change={data?.kpis.followers_change ?? 0}
+              icon={<FollowerIcon />}
+              iconBg="rgba(236,72,153,0.12)"
+              loading={loading}
+            />
+            <KpiCard
+              title="Impresiones"
+              value={formatKpiValue('imp', data?.kpis.total_impressions ?? 0)}
+              change={data?.kpis.impressions_change ?? 0}
+              icon={<ImpressionsIcon />}
+              iconBg="rgba(59,130,246,0.12)"
+              loading={loading}
+            />
+            <KpiCard
+              title="Clics"
+              value={formatKpiValue('clicks', data?.kpis.total_clicks ?? 0)}
+              change={data?.kpis.clicks_change ?? 0}
+              icon={<ImpressionsIcon />}
+              iconBg="rgba(59,130,246,0.08)"
+              loading={loading}
+            />
+          </div>
         </div>
 
         {/* ── Charts row ── */}

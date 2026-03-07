@@ -104,12 +104,17 @@ export interface SyncLog {
 // ─── Dashboard aggregated data ─────────────────────────────────────────────────
 export interface KpiSummary {
   total_impressions: number;
-  total_results: number;          // messaging conversations
+  total_results: number;          // all results combined
   total_spent: number;
   total_clicks: number;
   total_reach: number;
   total_likes: number;
   total_conversions: number;      // backward-compat = total_results
+  // ── Differentiated by objective ──
+  total_leads: number;            // WhatsApp + form leads ONLY
+  total_video_views: number;      // video view objectives
+  total_followers: number;        // page likes + follows
+  total_costo_por_lead: number;   // spent / total_leads
   impressions_change: number;
   results_change: number;
   spent_change: number;
@@ -117,6 +122,9 @@ export interface KpiSummary {
   reach_change: number;
   likes_change: number;
   conversions_change: number;     // backward-compat = results_change
+  leads_change: number;
+  video_views_change: number;
+  followers_change: number;
 }
 
 export interface DailyChartPoint {
@@ -237,6 +245,135 @@ export interface SyncResponse {
   success: boolean;
   synced: number;
   platforms: string[];
+  error?: string;
+}
+
+// ─── CRM Types ────────────────────────────────────────────────────────────────
+
+export type CrmLeadStatus = 'abierto' | 'ganado' | 'perdido';
+export type CrmActivityType = 'Llamada' | 'WhatsApp' | 'Email' | 'Reunión' | 'Nota';
+export type CrmActivityResult =
+  | 'Contactó'
+  | 'No contestó'
+  | 'Interesado'
+  | 'No interesado'
+  | 'Propuesta enviada'
+  | 'Cerrado';
+export type CrmUserRole = 'admin' | 'asesor';
+export type CrmLeadOrigin =
+  | 'Meta Ads'
+  | 'Google Ads'
+  | 'TikTok Ads'
+  | 'Orgánico'
+  | 'Referido'
+  | 'WhatsApp'
+  | 'Otro';
+
+export interface CrmStage {
+  Id: number;
+  Nombre: string;
+  Orden: number;
+  Color: string;
+  Es_Ganado: boolean;
+  Es_Perdido: boolean;
+  Activo: boolean;
+}
+
+export interface CrmUser {
+  Id: number;
+  Nombre: string;
+  Email: string;
+  Rol: CrmUserRole;
+  Activo: boolean;
+}
+
+export interface CrmLead {
+  Id: number;
+  Nombre: string;
+  Telefono: string;
+  Email: string;
+  Empresa: string;
+  Origen: CrmLeadOrigin | string;
+  ID_Campana: string;
+  Nombre_Campana: string;
+  Plataforma_Origen: string;
+  Valor_Estimado: number;
+  Stage_Id: number;
+  Stage_Nombre: string;
+  Stage_Color?: string;
+  Usuario_Id: number;
+  Usuario_Nombre: string;
+  Fecha_Creacion: string;
+  Fecha_Ultimo_Contacto: string;
+  Proxima_Accion_Fecha: string;
+  Estado: CrmLeadStatus;
+  Motivo_Perdida: string;
+  Notas: string;
+  Fecha_Cierre: string;
+  // computed fields (not stored)
+  activity_count?: number;
+  days_in_stage?: number;
+  days_without_activity?: number;
+}
+
+export interface CrmActivity {
+  Id: number;
+  Lead_Id: number;
+  Lead_Nombre: string;
+  Usuario_Id: number;
+  Usuario_Nombre: string;
+  Tipo: CrmActivityType;
+  Resultado: CrmActivityResult | string;
+  Nota: string;
+  Fecha: string;
+  Proxima_Accion_Fecha: string;
+  Proxima_Accion_Nota: string;
+}
+
+export interface CrmStats {
+  leads_total: number;
+  leads_abiertos: number;
+  leads_ganados: number;
+  leads_perdidos: number;
+  leads_esta_semana: number;
+  pipeline_total: number;       // suma Valor_Estimado abiertos
+  revenue_ganado_mes: number;   // suma Valor_Estimado ganados este mes
+  tasa_cierre: number;          // % ganados / (ganados + perdidos)
+  ticket_promedio: number;
+  leads_sin_actividad: number;  // días sin actividad > 48h
+  ciclo_promedio_dias: number;  // días promedio de apertura a cierre
+}
+
+// ─── CRM API Responses ────────────────────────────────────────────────────────
+
+export interface CrmLeadsResponse {
+  success: boolean;
+  data: CrmLead[];
+  total: number;
+  error?: string;
+}
+
+export interface CrmLeadResponse {
+  success: boolean;
+  data: CrmLead;
+  error?: string;
+}
+
+export interface CrmStagesResponse {
+  success: boolean;
+  data: CrmStage[];
+  error?: string;
+}
+
+export interface CrmActivitiesResponse {
+  success: boolean;
+  data: CrmActivity[];
+  error?: string;
+}
+
+export interface CrmStatsResponse {
+  success: boolean;
+  data: CrmStats;
   error?: string;
 }
 

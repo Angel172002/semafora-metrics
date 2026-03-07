@@ -72,15 +72,30 @@ function generateKpis(current: DailyChartPoint[], previous: DailyChartPoint[]): 
   const prevCl = sum(previous, 'clicks');  const prevIm = sum(previous, 'impressions');
   const prevRe = sum(previous, 'reach');   const prevLk = sum(previous, 'likes');
 
+  // Mock: ~70% of results are WA leads, ~25% video, ~5% followers
+  const curLeads   = Math.round(curR * 0.70);
+  const curVideo   = Math.round(curR * 0.25);
+  const curFollow  = curR - curLeads - curVideo;
+  const prevLeads  = Math.round(prevR * 0.70);
+  const prevVideo  = Math.round(prevR * 0.25);
+  const prevFollow = prevR - prevLeads - prevVideo;
+
   return {
     total_impressions: curIm,  total_results: curR,
     total_spent: curSp,        total_clicks: curCl,
     total_reach: curRe,        total_likes: curLk,
     total_conversions: curR,
+    total_leads:          curLeads,
+    total_video_views:    curVideo,
+    total_followers:      curFollow,
+    total_costo_por_lead: curLeads > 0 ? parseFloat((curSp / curLeads).toFixed(2)) : 0,
     impressions_change: pct(curIm, prevIm), results_change: pct(curR, prevR),
     spent_change: pct(curSp, prevSp),       clicks_change: pct(curCl, prevCl),
     reach_change: pct(curRe, prevRe),       likes_change: pct(curLk, prevLk),
     conversions_change: pct(curR, prevR),
+    leads_change:       pct(curLeads, prevLeads),
+    video_views_change: pct(curVideo, prevVideo),
+    followers_change:   pct(curFollow, prevFollow),
   };
 }
 

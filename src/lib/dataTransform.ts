@@ -21,6 +21,31 @@ import type {
   CampaignStatus,
 } from '@/types';
 
+// ─── Result type categories ───────────────────────────────────────────────────
+/** ONLY these count as true conversions (WhatsApp + form leads) */
+const LEAD_RESULT_TYPES = new Set([
+  'onsite_conversion.messaging_conversation_started_7d',
+  'onsite_conversion.messaging_conversation_started_30d',
+  'onsite_conversion.messaging_conversation_started',
+  'onsite_conversion.lead_grouped',
+  'lead',
+  'complete_registration',
+  'onsite_conversion.subscribe',
+]);
+
+const VIDEO_RESULT_TYPES = new Set([
+  'video_view',
+  'video_thruplay_watched_actions',
+  'video_p100_watched_actions',
+  'video_play_actions',
+]);
+
+const FOLLOWER_RESULT_TYPES = new Set([
+  'like',
+  'follow',
+  'page_like',
+]);
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 const PLATFORM_COLORS: Record<string, string> = {
   meta:      '#1877F2',
@@ -112,39 +137,58 @@ function pctChange(cur: number, prev: number): number {
 }
 
 // ─── KPIs ─────────────────────────────────────────────────────────────────────
+function sumByResultType(items: DailyMetric[], types: Set<string>): number {
+  return items
+    .filter((m) => types.has(m.result_type))
+    .reduce((acc, m) => acc + m.results, 0);
+}
+
 function buildKpis(current: DailyMetric[], previous: DailyMetric[]): KpiSummary {
   const cur = {
-    impressions: sumF(current, 'impressions'),
-    results:     sumF(current, 'results'),
-    spent:       sumF(current, 'spent'),
-    clicks:      sumF(current, 'clicks'),
-    reach:       sumF(current, 'reach'),
-    likes:       sumF(current, 'likes'),
+    impressions:  sumF(current, 'impressions'),
+    results:      sumF(current, 'results'),
+    spent:        sumF(current, 'spent'),
+    clicks:       sumF(current, 'clicks'),
+    reach:        sumF(current, 'reach'),
+    likes:        sumF(current, 'likes'),
+    leads:        sumByResultType(current,  LEAD_RESULT_TYPES),
+    video_views:  sumByResultType(current,  VIDEO_RESULT_TYPES),
+    followers:    sumByResultType(current,  FOLLOWER_RESULT_TYPES),
   };
   const prev = {
-    impressions: sumF(previous, 'impressions'),
-    results:     sumF(previous, 'results'),
-    spent:       sumF(previous, 'spent'),
-    clicks:      sumF(previous, 'clicks'),
-    reach:       sumF(previous, 'reach'),
-    likes:       sumF(previous, 'likes'),
+    impressions:  sumF(previous, 'impressions'),
+    results:      sumF(previous, 'results'),
+    spent:        sumF(previous, 'spent'),
+    clicks:       sumF(previous, 'clicks'),
+    reach:        sumF(previous, 'reach'),
+    likes:        sumF(previous, 'likes'),
+    leads:        sumByResultType(previous, LEAD_RESULT_TYPES),
+    video_views:  sumByResultType(previous, VIDEO_RESULT_TYPES),
+    followers:    sumByResultType(previous, FOLLOWER_RESULT_TYPES),
   };
 
   return {
-    total_impressions: cur.impressions,
-    total_results:     cur.results,
-    total_spent:       parseFloat(cur.spent.toFixed(2)),
-    total_clicks:      cur.clicks,
-    total_reach:       cur.reach,
-    total_likes:       cur.likes,
-    total_conversions: cur.results,      // backward-compat
-    impressions_change: pctChange(cur.impressions, prev.impressions),
-    results_change:     pctChange(cur.results, prev.results),
-    spent_change:       pctChange(cur.spent, prev.spent),
-    clicks_change:      pctChange(cur.clicks, prev.clicks),
-    reach_change:       pctChange(cur.reach, prev.reach),
-    likes_change:       pctChange(cur.likes, prev.likes),
-    conversions_change: pctChange(cur.results, prev.results), // backward-compat
+    total_impressions:    cur.impressions,
+    total_results:        cur.results,
+    total_spent:          parseFloat(cur.spent.toFixed(2)),
+    total_clicks:         cur.clicks,
+    total_reach:          cur.reach,
+    total_likes:          cur.likes,
+    total_conversions:    cur.results,   // backward-compat
+    total_leads:          cur.leads,
+    total_video_views:    cur.video_views,
+    total_followers:      cur.followers,
+    total_costo_por_lead: cur.leads > 0 ? parseFloat((cur.spent / cur.leads).toFixed(2)) : 0,
+    impressions_change:   pctChange(cur.impressions, prev.impressions),
+    results_change:       pctChange(cur.results, prev.results),
+    spent_change:         pctChange(cur.spent, prev.spent),
+    clicks_change:        pctChange(cur.clicks, prev.clicks),
+    reach_change:         pctChange(cur.reach, prev.reach),
+    likes_change:         pctChange(cur.likes, prev.likes),
+    conversions_change:   pctChange(cur.results, prev.results), // backward-compat
+    leads_change:         pctChange(cur.leads, prev.leads),
+    video_views_change:   pctChange(cur.video_views, prev.video_views),
+    followers_change:     pctChange(cur.followers, prev.followers),
   };
 }
 
