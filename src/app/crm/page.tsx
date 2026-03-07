@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
-import type { CrmLead, CrmStage, CrmUser, CrmStats as CrmStatsType } from '@/types';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import type { CrmLead, CrmStage, CrmUser, CrmStats as CrmStatsType, CrmLeadStatus } from '@/types';
 import CrmStats from '@/components/crm/CrmStats';
 import KanbanBoard from '@/components/crm/KanbanBoard';
 import LeadsTable from '@/components/crm/LeadsTable';
@@ -9,60 +9,161 @@ import LeadModal from '@/components/crm/LeadModal';
 
 type ViewMode = 'kanban' | 'list';
 
+const LIST_LIMIT = 50;
+
 export default function CrmPage() {
   const [viewMode, setViewMode] = useState<ViewMode>('kanban');
-  const [leads, setLeads] = useState<CrmLead[]>([]);
+
+  // ── Shared meta ────────────────────────────────────────────────────────────
   const [stages, setStages] = useState<CrmStage[]>([]);
-  const [users, setUsers] = useState<CrmUser[]>([]);
-  const [stats, setStats] = useState<CrmStatsType | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [users,  setUsers]  = useState<CrmUser[]>([]);
+  const [stats,  setStats]  = useState<CrmStatsType | null>(null);
+  const [metaLoading, setMetaLoading] = useState(true);
+
+  // ── Kanban: ONLY active leads (status=abierto) ────────────────────────────
+  const [kanbanLeads,   setKanbanLeads]   = useState<CrmLead[]>([]);
+  const [kanbanLoading, setKanbanLoading] = useState(true);
+  const [kanbanError,   setKanbanError]   = useState<string | null>(null);
+
+  // ── List: server-side paginated ────────────────────────────────────────────
+  const [listLeads,   setListLeads]   = useState<CrmLead[]>([]);
+  const [listPage,    setListPage]    = useState(1);
+  const [listTotal,   setListTotal]   = useState(0);
+  const [listPages,   setListPages]   = useState(1);
+  const [listLoading, setListLoading] = useState(false);
+
+  // List filters — controlled here, sent to API
+  const [listSearch,  setListSearch]  = useState('');
+  const [listStatus,  setListStatus]  = useState<'todos' | CrmLeadStatus>('todos');
+  const [listOrigin,  setListOrigin]  = useState('');
+  const [listStageId, setListStageId] = useState('');
+
+  // Debounce ref for search
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Modal state
-  const [selectedLead, setSelectedLead] = useState<CrmLead | null>(null);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [modalMode, setModalMode] = useState<'view' | 'create'>('view');
+  const [selectedLead,   setSelectedLead]   = useState<CrmLead | null>(null);
+  const [isModalOpen,    setIsModalOpen]     = useState(false);
+  const [modalMode,      setModalMode]       = useState<'view' | 'create'>('view');
   const [defaultStageId, setDefaultStageId] = useState<number | undefined>();
 
-  // ─── Data fetching ────────────────────────────────────────────────────────
-  const fetchAll = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  // ─── Fetch meta (stages + users + stats) ─────────────────────────────────
+  const fetchMeta = useCallback(async () => {
+    setMetaLoading(true);
     try {
-      const [leadsRes, stagesRes, usersRes, statsRes] = await Promise.all([
-        fetch('/api/crm/leads'),
+      const [sr, ur, str] = await Promise.all([
         fetch('/api/crm/stages'),
         fetch('/api/crm/users'),
         fetch('/api/crm/stats'),
       ]);
-
-      const [leadsData, stagesData, usersData, statsData] = await Promise.all([
-        leadsRes.json(),
-        stagesRes.json(),
-        usersRes.json(),
-        statsRes.json(),
-      ]);
-
-      if (leadsData.success)  setLeads(leadsData.data ?? []);
-      if (stagesData.success) setStages(stagesData.data ?? []);
-      if (usersData.success)  setUsers(usersData.data ?? []);
-      if (statsData.success)  setStats(statsData.data ?? null);
+      const [sd, ud, std] = await Promise.all([sr.json(), ur.json(), str.json()]);
+      if (sd.success)  setStages(sd.data  ?? []);
+      if (ud.success)  setUsers(ud.data   ?? []);
+      if (std.success) setStats(std.data  ?? null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Error al cargar datos');
+      console.error('[crm] fetchMeta error:', e);
     } finally {
-      setLoading(false);
+      setMetaLoading(false);
     }
   }, []);
 
-  useEffect(() => { fetchAll(); }, [fetchAll]);
+  // ─── Fetch Kanban: only active/open leads ────────────────────────────────
+  const fetchKanban = useCallback(async () => {
+    setKanbanLoading(true);
+    setKanbanError(null);
+    try {
+      const res  = await fetch('/api/crm/leads?status=abierto');
+      const data = await res.json();
+      if (data.success) setKanbanLeads(data.data ?? []);
+      else setKanbanError(data.error || 'Error al cargar Kanban');
+    } catch (e) {
+      setKanbanError(e instanceof Error ? e.message : 'Error al cargar datos');
+    } finally {
+      setKanbanLoading(false);
+    }
+  }, []);
 
-  // ─── Kanban drag & drop handler ──────────────────────────────────────────
+  // ─── Fetch List: one page at a time ──────────────────────────────────────
+  const fetchList = useCallback(async (
+    page: number,
+    search: string,
+    status: string,
+    origin: string,
+    stageId: string,
+  ) => {
+    setListLoading(true);
+    try {
+      const qs = new URLSearchParams({
+        page:  String(page),
+        limit: String(LIST_LIMIT),
+        ...(search.trim()      && { search: search.trim() }),
+        ...(status !== 'todos' && { status }),
+        ...(origin             && { origin }),
+        ...(stageId            && { stage: stageId }),
+      });
+      const res  = await fetch(`/api/crm/leads?${qs}`);
+      const data = await res.json();
+      if (data.success) {
+        setListLeads(data.data  ?? []);
+        setListTotal(data.total ?? 0);
+        setListPages(data.pages ?? 1);
+        setListPage(page);
+      }
+    } catch (e) {
+      console.error('[crm] fetchList error:', e);
+    } finally {
+      setListLoading(false);
+    }
+  }, []);
+
+  // ─── Initial load ────────────────────────────────────────────────────────
+  useEffect(() => {
+    fetchMeta();
+    fetchKanban();
+  }, [fetchMeta, fetchKanban]);
+
+  // Load list page 1 when switching to list view
+  useEffect(() => {
+    if (viewMode === 'list') {
+      fetchList(1, listSearch, listStatus, listOrigin, listStageId);
+    }
+  }, [viewMode]); // intentionally not exhaustive — only run on view switch
+
+  // ─── List filter handlers ────────────────────────────────────────────────
+  const handleListSearch = useCallback((v: string) => {
+    setListSearch(v);
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(() => {
+      fetchList(1, v, listStatus, listOrigin, listStageId);
+    }, 400);
+  }, [fetchList, listStatus, listOrigin, listStageId]);
+
+  const handleListStatus = useCallback((v: 'todos' | CrmLeadStatus) => {
+    setListStatus(v);
+    fetchList(1, listSearch, v, listOrigin, listStageId);
+  }, [fetchList, listSearch, listOrigin, listStageId]);
+
+  const handleListOrigin = useCallback((v: string) => {
+    setListOrigin(v);
+    fetchList(1, listSearch, listStatus, v, listStageId);
+  }, [fetchList, listSearch, listStatus, listStageId]);
+
+  const handleListStageId = useCallback((v: string) => {
+    setListStageId(v);
+    fetchList(1, listSearch, listStatus, listOrigin, v);
+  }, [fetchList, listSearch, listStatus, listOrigin]);
+
+  const handleListPageChange = useCallback((page: number) => {
+    fetchList(page, listSearch, listStatus, listOrigin, listStageId);
+  }, [fetchList, listSearch, listStatus, listOrigin, listStageId]);
+
+  // ─── Kanban drag & drop ──────────────────────────────────────────────────
   const handleStageDrop = useCallback(async (leadId: number, newStageId: number) => {
     const stage = stages.find((s) => s.Id === newStageId);
     if (!stage) return;
 
     // Optimistic update
-    setLeads((prev) =>
+    setKanbanLeads((prev) =>
       prev.map((l) =>
         l.Id === leadId
           ? { ...l, Stage_Id: newStageId, Stage_Nombre: stage.Nombre, Stage_Color: stage.Color }
@@ -76,30 +177,28 @@ export default function CrmPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ Stage_Id: newStageId }),
       });
-      if (!res.ok) {
-        // Revert on failure
-        fetchAll();
-      }
+      if (!res.ok) fetchKanban();
     } catch {
-      fetchAll();
+      fetchKanban();
     }
-  }, [stages, fetchAll]);
+  }, [stages, fetchKanban]);
 
-  // ─── "Ver todos" handler (Kanban → List with stage pre-filter) ───────────
-  const [listInitialStageId, setListInitialStageId] = useState<number | undefined>();
-
+  // ─── "Ver todos" (Kanban → List filtered by stage) ──────────────────────
   const handleViewAllStage = useCallback((stageId: number) => {
-    setListInitialStageId(stageId);
+    const sid = String(stageId);
+    setListStageId(sid);
+    setListSearch('');
+    setListStatus('todos');
+    setListOrigin('');
     setViewMode('list');
-  }, []);
+    fetchList(1, '', 'todos', '', sid);
+  }, [fetchList]);
 
-  // Reset stage filter when user manually switches back to kanban
   const handleSwitchToKanban = useCallback(() => {
-    setListInitialStageId(undefined);
     setViewMode('kanban');
   }, []);
 
-  // ─── Modal handlers ───────────────────────────────────────────────────────
+  // ─── Modal handlers ──────────────────────────────────────────────────────
   const handleLeadClick = useCallback((lead: CrmLead) => {
     setSelectedLead(lead);
     setModalMode('view');
@@ -122,10 +221,16 @@ export default function CrmPage() {
   const handleModalSave = useCallback(async () => {
     setIsModalOpen(false);
     setSelectedLead(null);
-    await fetchAll();
-  }, [fetchAll]);
+    fetchMeta();
+    fetchKanban();
+    if (viewMode === 'list') {
+      fetchList(listPage, listSearch, listStatus, listOrigin, listStageId);
+    }
+  }, [fetchMeta, fetchKanban, fetchList, viewMode, listPage, listSearch, listStatus, listOrigin, listStageId]);
 
-  // ─── Render ───────────────────────────────────────────────────────────────
+  // ─── Render ──────────────────────────────────────────────────────────────
+  const loading = metaLoading || kanbanLoading;
+
   return (
     <div className="flex flex-col h-full min-h-screen bg-[var(--bg)]">
       {/* ── Header ── */}
@@ -149,7 +254,7 @@ export default function CrmPage() {
 
       {/* ── Stats ── */}
       <div className="px-4 md:px-6 pt-4">
-        <CrmStats stats={stats} loading={loading} />
+        <CrmStats stats={stats} loading={metaLoading} />
       </div>
 
       {/* ── View Tabs ── */}
@@ -183,19 +288,24 @@ export default function CrmPage() {
           Lista
         </button>
 
-        {/* Lead count badge */}
-        {!loading && (
+        {/* Kanban: active leads count / List: total filtered */}
+        {viewMode === 'kanban' && !kanbanLoading && (
           <span className="ml-auto text-xs text-[var(--text-muted)] bg-white/5 px-3 py-1 rounded-full">
-            {leads.length} lead{leads.length !== 1 ? 's' : ''}
+            {kanbanLeads.length} activo{kanbanLeads.length !== 1 ? 's' : ''}
+          </span>
+        )}
+        {viewMode === 'list' && !listLoading && (
+          <span className="ml-auto text-xs text-[var(--text-muted)] bg-white/5 px-3 py-1 rounded-full">
+            {listTotal.toLocaleString('es-CO')} lead{listTotal !== 1 ? 's' : ''}
           </span>
         )}
       </div>
 
       {/* ── Error ── */}
-      {error && (
+      {kanbanError && viewMode === 'kanban' && (
         <div className="mx-4 md:mx-6 mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
-          {error} —{' '}
-          <button onClick={fetchAll} className="underline hover:no-underline">
+          {kanbanError} —{' '}
+          <button onClick={fetchKanban} className="underline hover:no-underline">
             Reintentar
           </button>
         </div>
@@ -206,7 +316,7 @@ export default function CrmPage() {
         {viewMode === 'kanban' ? (
           <div className="h-full">
             <KanbanBoard
-              leads={leads}
+              leads={kanbanLeads}
               stages={stages}
               loading={loading}
               onLeadClick={handleLeadClick}
@@ -218,12 +328,22 @@ export default function CrmPage() {
         ) : (
           <div className="px-4 md:px-6 pb-6">
             <LeadsTable
-              key={listInitialStageId ?? 'all'}
-              leads={leads}
+              leads={listLeads}
               stages={stages}
-              loading={loading}
+              loading={listLoading}
+              total={listTotal}
+              page={listPage}
+              totalPages={listPages}
+              search={listSearch}
+              status={listStatus}
+              origin={listOrigin}
+              stageId={listStageId}
               onLeadClick={handleLeadClick}
-              defaultStageId={listInitialStageId}
+              onPageChange={handleListPageChange}
+              onSearchChange={handleListSearch}
+              onStatusChange={handleListStatus}
+              onOriginChange={handleListOrigin}
+              onStageIdChange={handleListStageId}
             />
           </div>
         )}

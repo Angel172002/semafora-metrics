@@ -1,16 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { listAllRows, insertRow } from '@/lib/nocodb';
+import { listAllRows, listRowsPage, insertRow } from '@/lib/nocodb';
 import type { CrmLead } from '@/types';
 
-const PROJECT        = process.env.NOCODB_PROJECT_ID          || 'p0txioylznnyf39';
-const TABLE          = process.env.NOCODB_TABLE_CRM_LEADS     || '';
-const TABLE_STAGES   = process.env.NOCODB_TABLE_CRM_STAGES    || '';
-const TABLE_ACTIVITIES = process.env.NOCODB_TABLE_CRM_ACTIVITIES || '';
+const PROJECT          = process.env.NOCODB_PROJECT_ID            || 'p0txioylznnyf39';
+const TABLE            = process.env.NOCODB_TABLE_CRM_LEADS       || '';
+const TABLE_STAGES     = process.env.NOCODB_TABLE_CRM_STAGES      || '';
+const TABLE_ACTIVITIES = process.env.NOCODB_TABLE_CRM_ACTIVITIES  || '';
 
 // ─── GET /api/crm/leads ───────────────────────────────────────────────────────
 export async function GET(req: NextRequest) {
   if (!TABLE) {
-    return NextResponse.json({ success: false, data: [], total: 0, error: 'CRM Leads table not configured. Run POST /api/setup first.' }, { status: 503 });
+    return NextResponse.json(
+      { success: false, data: [], total: 0, pages: 1, error: 'CRM Leads table not configured. Run POST /api/setup first.' },
+      { status: 503 }
+    );
   }
 
   const { searchParams } = new URL(req.url);
@@ -18,47 +21,76 @@ export async function GET(req: NextRequest) {
   const status   = searchParams.get('status');
   const userId   = searchParams.get('usuario');
   const search   = searchParams.get('search');
+  const origin   = searchParams.get('origin');
   const includeActivities = searchParams.get('withActivities') === 'true';
 
-  // Build NocoDB where filter
+  // Server-side pagination — if page+limit are provided, use listRowsPage
+  const pageParam  = parseInt(searchParams.get('page')  || '0', 10);
+  const limitParam = parseInt(searchParams.get('limit') || '0', 10);
+  const isPaginated = pageParam > 0 && limitParam > 0;
+
+  // ── Build NocoDB where filter ──────────────────────────────────────────────
   const filters: string[] = [];
   if (stageId)  filters.push(`(Stage_Id,eq,${stageId})`);
   if (status)   filters.push(`(Estado,eq,${status})`);
   if (userId)   filters.push(`(Usuario_Id,eq,${userId})`);
+  if (origin)   filters.push(`(Origen,eq,${encodeURIComponent(origin)})`);
   if (search)   filters.push(`(Nombre,like,%${search}%)`);
 
   const params: Record<string, string> = { sort: '-Fecha_Creacion' };
   if (filters.length === 1) params.where = filters[0];
   if (filters.length > 1)  params.where = filters.join('~and');
 
+  // ── Helper: enrich a single lead with derived fields ──────────────────────
+  function enrich(lead: CrmLead): CrmLead {
+    const now        = new Date();
+    const createdAt  = lead.Fecha_Creacion      ? new Date(lead.Fecha_Creacion)      : now;
+    const lastContact = lead.Fecha_Ultimo_Contacto ? new Date(lead.Fecha_Ultimo_Contacto) : createdAt;
+    return {
+      ...lead,
+      days_without_activity: Math.floor((now.getTime() - lastContact.getTime()) / 86400000),
+    };
+  }
+
   try {
-    const rows = await listAllRows<CrmLead>(PROJECT, TABLE, params);
+    let rows: CrmLead[];
+    let total: number;
+    let pages = 1;
 
-    // Compute derived fields
-    const now = new Date();
-    const enriched = rows.map((lead) => {
-      const createdAt = lead.Fecha_Creacion ? new Date(lead.Fecha_Creacion) : now;
-      const lastContact = lead.Fecha_Ultimo_Contacto ? new Date(lead.Fecha_Ultimo_Contacto) : createdAt;
-      const daysWithout = Math.floor((now.getTime() - lastContact.getTime()) / 86400000);
-      return {
-        ...lead,
-        days_without_activity: daysWithout,
-      };
-    });
+    if (isPaginated) {
+      // ── Server-side: only fetch the requested page ─────────────────────────
+      const result = await listRowsPage<CrmLead>(PROJECT, TABLE, pageParam, limitParam, params);
+      rows  = result.list;
+      total = result.total;
+      pages = result.pages;
+    } else {
+      // ── Legacy / Kanban: fetch all matching rows ───────────────────────────
+      rows  = await listAllRows<CrmLead>(PROJECT, TABLE, params);
+      total = rows.length;
+    }
 
-    // Optionally attach activity counts
+    const enriched = rows.map(enrich);
+
+    // Optionally attach activity counts (only for full fetch, too slow for paginated)
     let finalRows = enriched;
-    if (includeActivities && TABLE_ACTIVITIES) {
+    if (includeActivities && TABLE_ACTIVITIES && !isPaginated) {
       const allActivities = await listAllRows<{ Lead_Id: number }>(PROJECT, TABLE_ACTIVITIES, { fields: 'Lead_Id' });
       const countMap: Record<number, number> = {};
       allActivities.forEach((a) => { countMap[a.Lead_Id] = (countMap[a.Lead_Id] || 0) + 1; });
       finalRows = enriched.map((l) => ({ ...l, activity_count: countMap[l.Id] || 0 }));
     }
 
-    return NextResponse.json({ success: true, data: finalRows, total: finalRows.length });
+    return NextResponse.json({
+      success:  true,
+      data:     finalRows,
+      total,
+      page:     isPaginated ? pageParam : 1,
+      pageSize: isPaginated ? limitParam : total,
+      pages,
+    });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    return NextResponse.json({ success: false, data: [], total: 0, error: msg }, { status: 500 });
+    return NextResponse.json({ success: false, data: [], total: 0, pages: 1, error: msg }, { status: 500 });
   }
 }
 

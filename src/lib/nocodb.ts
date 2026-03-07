@@ -77,6 +77,40 @@ export async function listRows<T>(
   return res.list;
 }
 
+/** Interface returned by listRowsPage — a single page with total count */
+export interface NocoPage<T> {
+  list: T[];
+  total: number;
+  page: number;
+  pageSize: number;
+  pages: number;
+}
+
+/**
+ * Fetch ONE page of rows with true server-side pagination.
+ * Use this for List views where you never need all records at once.
+ */
+export async function listRowsPage<T>(
+  projectId: string,
+  tableId: string,
+  page: number,
+  limit: number,
+  extraParams: Record<string, string> = {}
+): Promise<NocoPage<T>> {
+  const offset = (page - 1) * limit;
+  const params = { ...extraParams, limit: String(limit), offset: String(offset) };
+  const qs = new URLSearchParams(params).toString();
+  const res = await nocoFetch<NocoDBListResponse<T>>(`${projectId}/${tableId}?${qs}`);
+  const total = res.pageInfo.totalRows;
+  return {
+    list: res.list,
+    total,
+    page,
+    pageSize: limit,
+    pages: Math.max(1, Math.ceil(total / limit)),
+  };
+}
+
 /** List ALL rows from a table (handles NocoDB pagination internally). */
 export async function listAllRows<T>(
   projectId: string,
@@ -287,6 +321,7 @@ export async function checkNocoDBConnection(): Promise<boolean> {
 
 export default {
   listRows,
+  listRowsPage,
   listAllRows,
   insertRow,
   bulkInsert,

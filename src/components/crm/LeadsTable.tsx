@@ -1,17 +1,36 @@
 'use client';
 
-import { useState, useMemo, useEffect } from 'react';
-import { CrmLead, CrmStage, CrmLeadStatus, CrmLeadOrigin } from '@/types';
+import { useState, useMemo } from 'react';
+import type { CrmLead, CrmStage, CrmLeadStatus, CrmLeadOrigin } from '@/types';
 import { formatCOP } from '@/lib/format';
 
-const PAGE_SIZE = 50;
+// ─── Props: LeadsTable is a CONTROLLED component ──────────────────────────────
+// Filtering and pagination happen server-side (managed by crm/page.tsx).
+// LeadsTable only handles client-side SORTING within the current page.
 
 interface Props {
+  // Data
   leads: CrmLead[];
-  stages?: CrmStage[];
+  stages: CrmStage[];
   loading: boolean;
+
+  // Server-side pagination info
+  total: number;        // total matching records across all pages
+  page: number;         // current page (1-based)
+  totalPages: number;
+  onPageChange: (page: number) => void;
+
+  // Controlled filters (bound to parent state)
+  search: string;
+  onSearchChange: (v: string) => void;
+  status: 'todos' | CrmLeadStatus;
+  onStatusChange: (v: 'todos' | CrmLeadStatus) => void;
+  origin: string;
+  onOriginChange: (v: string) => void;
+  stageId: string;
+  onStageIdChange: (v: string) => void;
+
   onLeadClick: (lead: CrmLead) => void;
-  defaultStageId?: number;
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -74,33 +93,18 @@ function exportCsv(leads: CrmLead[]) {
   ];
 
   const rows = leads.map((l) => [
-    l.Nombre,
-    l.Telefono,
-    l.Email,
-    l.Empresa,
-    l.Origen,
-    l.Nombre_Campana,
-    l.Stage_Nombre,
-    l.Usuario_Nombre,
-    l.Valor_Estimado,
-    l.Estado,
-    l.days_without_activity ?? 0,
-    l.Proxima_Accion_Fecha || '',
-    l.Fecha_Creacion,
+    l.Nombre, l.Telefono, l.Email, l.Empresa, l.Origen, l.Nombre_Campana,
+    l.Stage_Nombre, l.Usuario_Nombre, l.Valor_Estimado, l.Estado,
+    l.days_without_activity ?? 0, l.Proxima_Accion_Fecha || '', l.Fecha_Creacion,
   ]);
 
-  const csvContent =
-    [headers, ...rows]
-      .map((row) =>
-        row
-          .map((cell) => `"${String(cell ?? '').replace(/"/g, '""')}"`)
-          .join(',')
-      )
-      .join('\n');
+  const csvContent = [headers, ...rows]
+    .map((row) => row.map((cell) => `"${String(cell ?? '').replace(/"/g, '""')}"`).join(','))
+    .join('\n');
 
   const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
   a.href = url;
   a.download = `leads_${new Date().toISOString().slice(0, 10)}.csv`;
   a.click();
@@ -124,64 +128,27 @@ function SkeletonRow() {
 // ─── Sort icon ────────────────────────────────────────────────────────────────
 
 function SortIcon({ active, dir }: { active: boolean; dir: SortDir }) {
-  if (!active) {
-    return <span style={{ color: 'var(--muted)', opacity: 0.4 }}> ↕</span>;
-  }
+  if (!active) return <span style={{ color: 'var(--muted)', opacity: 0.4 }}> ↕</span>;
   return <span style={{ color: 'var(--primary)' }}>{dir === 'asc' ? ' ↑' : ' ↓'}</span>;
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export default function LeadsTable({ leads, stages = [], loading, onLeadClick, defaultStageId }: Props) {
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'todos' | CrmLeadStatus>('todos');
-  const [originFilter, setOriginFilter] = useState<'' | string>('');
-  const [stageFilter, setStageFilter] = useState<string>(defaultStageId ? String(defaultStageId) : '');
+export default function LeadsTable({
+  leads, stages, loading,
+  total, page, totalPages, onPageChange,
+  search, onSearchChange,
+  status, onStatusChange,
+  origin, onOriginChange,
+  stageId, onStageIdChange,
+  onLeadClick,
+}: Props) {
+  // Client-side sorting within the current page (cheap, no refetch needed)
   const [sortKey, setSortKey] = useState<SortKey>('Nombre');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
-  const [currentPage, setCurrentPage] = useState(1);
 
-  // Reset page when filters change
-  useEffect(() => { setCurrentPage(1); }, [search, statusFilter, originFilter, stageFilter]);
-
-  // Sync stageFilter when defaultStageId changes from parent (Kanban "Ver todos")
-  useEffect(() => {
-    setStageFilter(defaultStageId ? String(defaultStageId) : '');
-    setCurrentPage(1);
-  }, [defaultStageId]);
-
-  // ── Filtering ────────────────────────────────────────────────────────────────
-  const filtered = useMemo(() => {
-    let result = leads;
-
-    if (search.trim()) {
-      const q = search.trim().toLowerCase();
-      result = result.filter(
-        (l) =>
-          l.Nombre.toLowerCase().includes(q) ||
-          (l.Telefono || '').toLowerCase().includes(q) ||
-          (l.Email || '').toLowerCase().includes(q)
-      );
-    }
-
-    if (statusFilter !== 'todos') {
-      result = result.filter((l) => l.Estado === statusFilter);
-    }
-
-    if (originFilter) {
-      result = result.filter((l) => l.Origen === originFilter);
-    }
-
-    if (stageFilter) {
-      result = result.filter((l) => String(l.Stage_Id) === stageFilter);
-    }
-
-    return result;
-  }, [leads, search, statusFilter, originFilter, stageFilter]);
-
-  // ── Sorting ──────────────────────────────────────────────────────────────────
   const sorted = useMemo(() => {
-    return [...filtered].sort((a, b) => {
+    return [...leads].sort((a, b) => {
       const av = a[sortKey] ?? '';
       const bv = b[sortKey] ?? '';
       let cmp = 0;
@@ -192,12 +159,7 @@ export default function LeadsTable({ leads, stages = [], loading, onLeadClick, d
       }
       return sortDir === 'asc' ? cmp : -cmp;
     });
-  }, [filtered, sortKey, sortDir]);
-
-  // ── Pagination ───────────────────────────────────────────────────────────────
-  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
-  const safePage   = Math.min(currentPage, totalPages);
-  const paginated  = sorted.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  }, [leads, sortKey, sortDir]);
 
   function handleSort(key: SortKey) {
     if (key === sortKey) {
@@ -225,7 +187,8 @@ export default function LeadsTable({ leads, stages = [], loading, onLeadClick, d
 
   return (
     <div className="flex flex-col gap-3">
-      {/* Top bar: search + filters + export */}
+
+      {/* ── Top bar: search + filters + export ── */}
       <div className="flex items-center gap-3 flex-wrap">
         {/* Search */}
         <div className="relative flex-1 min-w-[200px] max-w-xs">
@@ -242,8 +205,8 @@ export default function LeadsTable({ leads, stages = [], loading, onLeadClick, d
           <input
             type="text"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Buscar por nombre, teléfono o email..."
+            onChange={(e) => onSearchChange(e.target.value)}
+            placeholder="Buscar por nombre..."
             className="w-full pl-8 pr-3 py-2 rounded-lg text-sm outline-none"
             style={{
               background: 'rgba(255,255,255,0.04)',
@@ -256,13 +219,13 @@ export default function LeadsTable({ leads, stages = [], loading, onLeadClick, d
         {/* Stage filter */}
         {stages.length > 0 && (
           <select
-            value={stageFilter}
-            onChange={(e) => setStageFilter(e.target.value)}
+            value={stageId}
+            onChange={(e) => onStageIdChange(e.target.value)}
             className="px-3 py-2 rounded-lg text-sm outline-none"
             style={{
               background: 'rgba(255,255,255,0.04)',
               border: '1px solid var(--border)',
-              color: stageFilter ? 'var(--text)' : 'var(--muted)',
+              color: stageId ? 'var(--text)' : 'var(--muted)',
             }}
           >
             <option value="" style={{ background: '#141414' }}>Todas las etapas</option>
@@ -276,13 +239,13 @@ export default function LeadsTable({ leads, stages = [], loading, onLeadClick, d
 
         {/* Origin filter */}
         <select
-          value={originFilter}
-          onChange={(e) => setOriginFilter(e.target.value)}
+          value={origin}
+          onChange={(e) => onOriginChange(e.target.value)}
           className="px-3 py-2 rounded-lg text-sm outline-none"
           style={{
             background: 'rgba(255,255,255,0.04)',
             border: '1px solid var(--border)',
-            color: originFilter ? 'var(--text)' : 'var(--muted)',
+            color: origin ? 'var(--text)' : 'var(--muted)',
           }}
         >
           {ORIGIN_OPTIONS.map((o) => (
@@ -292,7 +255,7 @@ export default function LeadsTable({ leads, stages = [], loading, onLeadClick, d
           ))}
         </select>
 
-        {/* Export button — exports all filtered rows */}
+        {/* Export — exports current page data */}
         <button
           onClick={() => exportCsv(sorted)}
           className="ml-auto flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold transition-all hover:opacity-80"
@@ -311,33 +274,27 @@ export default function LeadsTable({ leads, stages = [], loading, onLeadClick, d
         </button>
       </div>
 
-      {/* Status filter pills */}
+      {/* ── Status filter pills ── */}
       <div className="flex items-center gap-2 flex-wrap">
         {STATUS_FILTER_LABELS.map(({ value, label }) => (
           <button
             key={value}
-            onClick={() => setStatusFilter(value)}
+            onClick={() => onStatusChange(value)}
             className="px-3 py-1 rounded-full text-xs font-semibold transition-all"
             style={{
               background:
-                statusFilter === value
-                  ? value === 'todos'
-                    ? 'var(--primary)'
-                    : value === 'ganado'
-                    ? 'rgba(74,222,128,0.2)'
-                    : value === 'perdido'
-                    ? 'rgba(248,113,113,0.2)'
-                    : 'rgba(59,130,246,0.2)'
+                status === value
+                  ? value === 'todos'   ? 'var(--primary)'
+                  : value === 'ganado'  ? 'rgba(74,222,128,0.2)'
+                  : value === 'perdido' ? 'rgba(248,113,113,0.2)'
+                  :                      'rgba(59,130,246,0.2)'
                   : 'rgba(255,255,255,0.06)',
               color:
-                statusFilter === value
-                  ? value === 'todos'
-                    ? '#fff'
-                    : value === 'ganado'
-                    ? '#4ade80'
-                    : value === 'perdido'
-                    ? '#f87171'
-                    : '#60a5fa'
+                status === value
+                  ? value === 'todos'   ? '#fff'
+                  : value === 'ganado'  ? '#4ade80'
+                  : value === 'perdido' ? '#f87171'
+                  :                      '#60a5fa'
                   : 'var(--muted)',
               border: '1px solid var(--border)',
             }}
@@ -346,11 +303,11 @@ export default function LeadsTable({ leads, stages = [], loading, onLeadClick, d
           </button>
         ))}
         <span className="text-xs ml-1" style={{ color: 'var(--muted)' }}>
-          {loading ? '—' : `${sorted.length} resultado${sorted.length !== 1 ? 's' : ''}`}
+          {loading ? '—' : `${total.toLocaleString('es-CO')} resultado${total !== 1 ? 's' : ''}`}
         </span>
       </div>
 
-      {/* Table */}
+      {/* ── Table ── */}
       <div className="overflow-x-auto rounded-xl" style={{ border: '1px solid var(--border)' }}>
         <table className="w-full border-collapse text-sm">
           <thead>
@@ -371,17 +328,17 @@ export default function LeadsTable({ leads, stages = [], loading, onLeadClick, d
           </thead>
           <tbody>
             {loading ? (
-              Array.from({ length: 6 }).map((_, i) => <SkeletonRow key={i} />)
-            ) : paginated.length === 0 ? (
+              Array.from({ length: 8 }).map((_, i) => <SkeletonRow key={i} />)
+            ) : sorted.length === 0 ? (
               <tr>
                 <td colSpan={10} className="py-12 text-center text-sm" style={{ color: 'var(--muted)' }}>
-                  No hay leads
+                  No hay leads con los filtros actuales
                 </td>
               </tr>
             ) : (
-              paginated.map((lead) => {
-                const daysWithout = lead.days_without_activity ?? 0;
-                const statusBadge = STATUS_BADGE[lead.Estado] ?? STATUS_BADGE.abierto;
+              sorted.map((lead) => {
+                const daysWithout  = lead.days_without_activity ?? 0;
+                const statusBadge  = STATUS_BADGE[lead.Estado] ?? STATUS_BADGE.abierto;
 
                 return (
                   <tr
@@ -390,58 +347,37 @@ export default function LeadsTable({ leads, stages = [], loading, onLeadClick, d
                     className="cursor-pointer transition-colors hover:bg-white/[0.03]"
                     style={{ borderBottom: '1px solid var(--border)' }}
                   >
-                    {/* Nombre */}
                     <td className="px-3 py-2.5 font-medium max-w-[160px]" style={{ color: 'var(--text)' }}>
                       <span className="truncate block" title={lead.Nombre}>{lead.Nombre}</span>
                     </td>
-
-                    {/* Teléfono */}
                     <td className="px-3 py-2.5 whitespace-nowrap" style={{ color: 'var(--muted)' }}>
                       {lead.Telefono || '—'}
                     </td>
-
-                    {/* Origen */}
                     <td className="px-3 py-2.5 whitespace-nowrap" style={{ color: 'var(--muted)' }}>
                       {lead.Origen || '—'}
                     </td>
-
-                    {/* Campaña */}
                     <td className="px-3 py-2.5 max-w-[140px]" style={{ color: 'var(--muted)' }}>
                       <span className="truncate block" title={lead.Nombre_Campana}>{lead.Nombre_Campana || '—'}</span>
                     </td>
-
-                    {/* Etapa */}
                     <td className="px-3 py-2.5 whitespace-nowrap" style={{ color: 'var(--text)' }}>
                       {lead.Stage_Nombre || '—'}
                     </td>
-
-                    {/* Asesor */}
                     <td className="px-3 py-2.5 whitespace-nowrap" style={{ color: 'var(--muted)' }}>
                       {lead.Usuario_Nombre || '—'}
                     </td>
-
-                    {/* Valor Estimado */}
                     <td className="px-3 py-2.5 whitespace-nowrap font-mono text-right" style={{ color: '#4ade80' }}>
                       {lead.Valor_Estimado > 0 ? formatCOP(lead.Valor_Estimado, true) : '—'}
                     </td>
-
-                    {/* Días sin actividad */}
                     <td className="px-3 py-2.5 whitespace-nowrap text-center">
                       {daysWithout > 2 ? (
-                        <span style={{ color: '#fb923c' }}>
-                          ⚠️ {daysWithout}d
-                        </span>
+                        <span style={{ color: '#fb923c' }}>⚠️ {daysWithout}d</span>
                       ) : (
                         <span style={{ color: 'var(--muted)' }}>{daysWithout}d</span>
                       )}
                     </td>
-
-                    {/* Próxima Acción */}
                     <td className="px-3 py-2.5 whitespace-nowrap" style={{ color: 'var(--muted)' }}>
                       {formatDate(lead.Proxima_Accion_Fecha)}
                     </td>
-
-                    {/* Estado */}
                     <td className="px-3 py-2.5 whitespace-nowrap">
                       <span
                         className="text-[11px] font-semibold px-2 py-0.5 rounded-full"
@@ -458,45 +394,43 @@ export default function LeadsTable({ leads, stages = [], loading, onLeadClick, d
         </table>
       </div>
 
-      {/* Pagination bar */}
+      {/* ── Pagination bar ── */}
       {totalPages > 1 && (
         <div className="flex items-center justify-between pt-1">
           <span className="text-xs" style={{ color: 'var(--muted)' }}>
-            Página {safePage} de {totalPages} · {sorted.length} leads
+            Página {page} de {totalPages} · {total.toLocaleString('es-CO')} leads en total
           </span>
           <div className="flex items-center gap-1">
-            {/* Previous */}
             <button
-              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-              disabled={safePage === 1}
+              onClick={() => onPageChange(Math.max(1, page - 1))}
+              disabled={page === 1}
               className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-30"
               style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid var(--border)', color: 'var(--text)' }}
             >
               ← Anterior
             </button>
 
-            {/* Page numbers — show up to 5 pages around current */}
+            {/* Page numbers: show up to 5 around current */}
             {Array.from({ length: totalPages }, (_, i) => i + 1)
-              .filter((p) => Math.abs(p - safePage) <= 2)
+              .filter((p) => Math.abs(p - page) <= 2)
               .map((p) => (
                 <button
                   key={p}
-                  onClick={() => setCurrentPage(p)}
+                  onClick={() => onPageChange(p)}
                   className="w-8 h-8 rounded-lg text-xs font-semibold transition-all"
                   style={{
-                    background: p === safePage ? 'var(--primary)' : 'rgba(255,255,255,0.06)',
-                    border: '1px solid var(--border)',
-                    color: p === safePage ? '#fff' : 'var(--muted)',
+                    background: p === page ? 'var(--primary)' : 'rgba(255,255,255,0.06)',
+                    border:     '1px solid var(--border)',
+                    color:      p === page ? '#fff' : 'var(--muted)',
                   }}
                 >
                   {p}
                 </button>
               ))}
 
-            {/* Next */}
             <button
-              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-              disabled={safePage === totalPages}
+              onClick={() => onPageChange(Math.min(totalPages, page + 1))}
+              disabled={page === totalPages}
               className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-30"
               style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid var(--border)', color: 'var(--text)' }}
             >
