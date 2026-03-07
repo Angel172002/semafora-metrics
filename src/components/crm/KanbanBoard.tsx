@@ -11,6 +11,7 @@ interface Props {
   onLeadClick: (lead: CrmLead) => void;
   onAddLead: (stageId: number) => void;
   onStageDrop: (leadId: number, newStageId: number) => void;
+  onViewAllStage: (stageId: number) => void;
 }
 
 // ─── Skeleton card ────────────────────────────────────────────────────────────
@@ -27,6 +28,8 @@ function SkeletonCard() {
 
 // ─── Column ───────────────────────────────────────────────────────────────────
 
+const CARDS_PER_COLUMN = 15;
+
 interface ColumnProps {
   stage: CrmStage;
   leads: CrmLead[];
@@ -34,9 +37,10 @@ interface ColumnProps {
   onLeadClick: (lead: CrmLead) => void;
   onAddLead: (stageId: number) => void;
   onStageDrop: (leadId: number, newStageId: number) => void;
+  onViewAllStage: (stageId: number) => void;
 }
 
-function KanbanColumn({ stage, leads, loading, onLeadClick, onAddLead, onStageDrop }: ColumnProps) {
+function KanbanColumn({ stage, leads, loading, onLeadClick, onAddLead, onStageDrop, onViewAllStage }: ColumnProps) {
   const [isDragOver, setIsDragOver] = useState(false);
 
   function handleDragStart(e: React.DragEvent<HTMLDivElement>, leadId: number) {
@@ -134,15 +138,31 @@ function KanbanColumn({ stage, leads, loading, onLeadClick, onAddLead, onStageDr
             Sin leads en esta etapa
           </div>
         ) : (
-          leads.map((lead) => (
-            <div
-              key={lead.Id}
-              draggable
-              onDragStart={(e) => handleDragStart(e, lead.Id)}
-            >
-              <LeadCard lead={lead} onClick={onLeadClick} />
-            </div>
-          ))
+          <>
+            {leads.slice(0, CARDS_PER_COLUMN).map((lead) => (
+              <div
+                key={lead.Id}
+                draggable
+                onDragStart={(e) => handleDragStart(e, lead.Id)}
+              >
+                <LeadCard lead={lead} onClick={onLeadClick} />
+              </div>
+            ))}
+            {/* "Ver todos" badge when there are more cards */}
+            {leads.length > CARDS_PER_COLUMN && (
+              <button
+                onClick={() => onViewAllStage(stage.Id)}
+                className="w-full py-2 rounded-xl text-xs font-semibold transition-all hover:opacity-80"
+                style={{
+                  background: `${stage.Color}18`,
+                  border: `1px solid ${stage.Color}40`,
+                  color: stage.Color,
+                }}
+              >
+                Ver todos · {leads.length} leads
+              </button>
+            )}
+          </>
         )}
       </div>
     </div>
@@ -151,7 +171,7 @@ function KanbanColumn({ stage, leads, loading, onLeadClick, onAddLead, onStageDr
 
 // ─── Board ────────────────────────────────────────────────────────────────────
 
-export default function KanbanBoard({ stages, leads, loading, onLeadClick, onAddLead, onStageDrop }: Props) {
+export default function KanbanBoard({ stages, leads, loading, onLeadClick, onAddLead, onStageDrop, onViewAllStage }: Props) {
   // Sort stages by Orden
   const sortedStages = [...stages].sort((a, b) => a.Orden - b.Orden);
 
@@ -183,6 +203,7 @@ export default function KanbanBoard({ stages, leads, loading, onLeadClick, onAdd
                 onLeadClick={onLeadClick}
                 onAddLead={onAddLead}
                 onStageDrop={onStageDrop}
+                onViewAllStage={onViewAllStage}
               />
             );
           })}

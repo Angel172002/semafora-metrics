@@ -85,6 +85,20 @@ export default function CrmPage() {
     }
   }, [stages, fetchAll]);
 
+  // ─── "Ver todos" handler (Kanban → List with stage pre-filter) ───────────
+  const [listInitialStageId, setListInitialStageId] = useState<number | undefined>();
+
+  const handleViewAllStage = useCallback((stageId: number) => {
+    setListInitialStageId(stageId);
+    setViewMode('list');
+  }, []);
+
+  // Reset stage filter when user manually switches back to kanban
+  const handleSwitchToKanban = useCallback(() => {
+    setListInitialStageId(undefined);
+    setViewMode('kanban');
+  }, []);
+
   // ─── Modal handlers ───────────────────────────────────────────────────────
   const handleLeadClick = useCallback((lead: CrmLead) => {
     setSelectedLead(lead);
@@ -141,7 +155,7 @@ export default function CrmPage() {
       {/* ── View Tabs ── */}
       <div className="px-4 md:px-6 pt-4 pb-2 flex items-center gap-1">
         <button
-          onClick={() => setViewMode('kanban')}
+          onClick={handleSwitchToKanban}
           className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
             viewMode === 'kanban'
               ? 'bg-white/10 text-white'
@@ -198,14 +212,18 @@ export default function CrmPage() {
               onLeadClick={handleLeadClick}
               onStageDrop={handleStageDrop}
               onAddLead={handleAddLead}
+              onViewAllStage={handleViewAllStage}
             />
           </div>
         ) : (
           <div className="px-4 md:px-6 pb-6">
             <LeadsTable
+              key={listInitialStageId ?? 'all'}
               leads={leads}
+              stages={stages}
               loading={loading}
               onLeadClick={handleLeadClick}
+              defaultStageId={listInitialStageId}
             />
           </div>
         )}
