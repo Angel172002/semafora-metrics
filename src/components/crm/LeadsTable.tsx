@@ -209,7 +209,7 @@ export default function LeadsTable({
             placeholder="Buscar por nombre..."
             className="w-full pl-8 pr-3 py-2 rounded-lg text-sm outline-none"
             style={{
-              background: 'rgba(255,255,255,0.04)',
+              background: 'var(--input-bg)',
               border: '1px solid var(--border)',
               color: 'var(--text)',
             }}
@@ -223,14 +223,14 @@ export default function LeadsTable({
             onChange={(e) => onStageIdChange(e.target.value)}
             className="px-3 py-2 rounded-lg text-sm outline-none"
             style={{
-              background: 'rgba(255,255,255,0.04)',
+              background: 'var(--input-bg)',
               border: '1px solid var(--border)',
               color: stageId ? 'var(--text)' : 'var(--muted)',
             }}
           >
-            <option value="" style={{ background: '#141414' }}>Todas las etapas</option>
+            <option value="" style={{ background: 'var(--option-bg)', color: 'var(--text)' }}>Todas las etapas</option>
             {stages.map((s) => (
-              <option key={s.Id} value={String(s.Id)} style={{ background: '#141414' }}>
+              <option key={s.Id} value={String(s.Id)} style={{ background: 'var(--option-bg)', color: 'var(--text)' }}>
                 {s.Nombre}
               </option>
             ))}
@@ -243,13 +243,13 @@ export default function LeadsTable({
           onChange={(e) => onOriginChange(e.target.value)}
           className="px-3 py-2 rounded-lg text-sm outline-none"
           style={{
-            background: 'rgba(255,255,255,0.04)',
+            background: 'var(--input-bg)',
             border: '1px solid var(--border)',
             color: origin ? 'var(--text)' : 'var(--muted)',
           }}
         >
           {ORIGIN_OPTIONS.map((o) => (
-            <option key={o.value} value={o.value} style={{ background: '#141414' }}>
+            <option key={o.value} value={o.value} style={{ background: 'var(--option-bg)', color: 'var(--text)' }}>
               {o.label}
             </option>
           ))}
@@ -260,7 +260,7 @@ export default function LeadsTable({
           onClick={() => exportCsv(sorted)}
           className="ml-auto flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold transition-all hover:opacity-80"
           style={{
-            background: 'rgba(255,255,255,0.06)',
+            background: 'var(--chip-bg)',
             border: '1px solid var(--border)',
             color: 'var(--text)',
           }}
@@ -288,7 +288,7 @@ export default function LeadsTable({
                   : value === 'ganado'  ? 'rgba(74,222,128,0.2)'
                   : value === 'perdido' ? 'rgba(248,113,113,0.2)'
                   :                      'rgba(59,130,246,0.2)'
-                  : 'rgba(255,255,255,0.06)',
+                  : 'var(--chip-bg)',
               color:
                 status === value
                   ? value === 'todos'   ? '#fff'
@@ -405,7 +405,7 @@ export default function LeadsTable({
               onClick={() => onPageChange(Math.max(1, page - 1))}
               disabled={page === 1}
               className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-30"
-              style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid var(--border)', color: 'var(--text)' }}
+              style={{ background: 'var(--chip-bg)', border: '1px solid var(--border)', color: 'var(--text)' }}
             >
               ← Anterior
             </button>
@@ -419,7 +419,7 @@ export default function LeadsTable({
                   onClick={() => onPageChange(p)}
                   className="w-8 h-8 rounded-lg text-xs font-semibold transition-all"
                   style={{
-                    background: p === page ? 'var(--primary)' : 'rgba(255,255,255,0.06)',
+                    background: p === page ? 'var(--primary)' : 'var(--chip-bg)',
                     border:     '1px solid var(--border)',
                     color:      p === page ? '#fff' : 'var(--muted)',
                   }}
@@ -432,7 +432,7 @@ export default function LeadsTable({
               onClick={() => onPageChange(Math.min(totalPages, page + 1))}
               disabled={page === totalPages}
               className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-30"
-              style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid var(--border)', color: 'var(--text)' }}
+              style={{ background: 'var(--chip-bg)', border: '1px solid var(--border)', color: 'var(--text)' }}
             >
               Siguiente →
             </button>

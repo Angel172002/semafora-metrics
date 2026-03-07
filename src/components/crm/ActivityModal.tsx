@@ -136,7 +136,7 @@ export default function ActivityModal({ isOpen, onClose, leadId, leadName, onSav
                   onClick={() => setTipo(t)}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all"
                   style={{
-                    background: tipo === t ? 'var(--primary)' : 'rgba(255,255,255,0.06)',
+                    background: tipo === t ? 'var(--primary)' : 'var(--chip-bg)',
                     color: tipo === t ? '#fff' : 'var(--muted)',
                     border: tipo === t ? '1px solid var(--primary)' : '1px solid var(--border)',
                   }}
@@ -163,13 +163,13 @@ export default function ActivityModal({ isOpen, onClose, leadId, leadName, onSav
               onChange={(e) => setResultado(e.target.value as CrmActivityResult)}
               className="w-full rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-[var(--primary)]"
               style={{
-                background: 'rgba(255,255,255,0.04)',
+                background: 'var(--input-bg)',
                 border: '1px solid var(--border)',
                 color: 'var(--text)',
               }}
             >
               {RESULT_OPTIONS.map((r) => (
-                <option key={r} value={r} style={{ background: '#141414' }}>
+                <option key={r} value={r} style={{ background: 'var(--option-bg)', color: 'var(--text)' }}>
                   {r}
                 </option>
               ))}
@@ -193,7 +193,7 @@ export default function ActivityModal({ isOpen, onClose, leadId, leadName, onSav
               placeholder="Describe el resultado de la actividad..."
               className="w-full rounded-lg px-3 py-2 text-sm resize-none outline-none focus:ring-1"
               style={{
-                background: 'rgba(255,255,255,0.04)',
+                background: 'var(--input-bg)',
                 border: '1px solid var(--border)',
                 color: 'var(--text)',
               }}
@@ -217,10 +217,10 @@ export default function ActivityModal({ isOpen, onClose, leadId, leadName, onSav
                 onChange={(e) => setProximaFecha(e.target.value)}
                 className="w-full rounded-lg px-3 py-2 text-sm outline-none focus:ring-1"
                 style={{
-                  background: 'rgba(255,255,255,0.04)',
+                  background: 'var(--input-bg)',
                   border: '1px solid var(--border)',
                   color: 'var(--text)',
-                  colorScheme: 'dark',
+                  colorScheme: 'dark' as const,
                 }}
               />
             </div>
@@ -240,7 +240,7 @@ export default function ActivityModal({ isOpen, onClose, leadId, leadName, onSav
                 placeholder="Ej: Llamar para seguimiento"
                 className="w-full rounded-lg px-3 py-2 text-sm outline-none focus:ring-1"
                 style={{
-                  background: 'rgba(255,255,255,0.04)',
+                  background: 'var(--input-bg)',
                   border: '1px solid var(--border)',
                   color: 'var(--text)',
                 }}

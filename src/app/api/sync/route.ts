@@ -2,14 +2,117 @@ import { NextRequest, NextResponse } from 'next/server';
 import { fetchAllMetaAccounts, isMetaConfigured } from '@/lib/integrations/meta';
 import { fetchAllGoogleAccounts, isGoogleConfigured } from '@/lib/integrations/google';
 import { fetchTikTokMetrics, isTikTokConfigured } from '@/lib/integrations/tiktok';
-import { bulkInsert, insertRow, clearRowsWhere } from '@/lib/nocodb';
+import { bulkInsert, insertRow, listAllRows, clearRowsWhere } from '@/lib/nocodb';
 import type { DailyMetric, AdSetMetric, AdMetric, SyncResponse, Platform } from '@/types';
 
-const NOCODB_PROJECT    = process.env.NOCODB_PROJECT_ID     || 'p0txioylznnyf39';
-const TABLE_CAMPAIGNS   = process.env.NOCODB_TABLE_METRICS  || 'mgp8sapw27x0zqv';
-const TABLE_ADSETS      = process.env.NOCODB_TABLE_ADSETS   || '';
-const TABLE_ADS         = process.env.NOCODB_TABLE_ADS      || '';
-const TABLE_SYNC_LOG    = process.env.NOCODB_TABLE_SYNC_LOG || 'ma1q0gfm8y5vuvy';
+const NOCODB_PROJECT    = process.env.NOCODB_PROJECT_ID        || 'p0txioylznnyf39';
+const TABLE_CAMPAIGNS   = process.env.NOCODB_TABLE_METRICS     || 'mgp8sapw27x0zqv';
+const TABLE_ADSETS      = process.env.NOCODB_TABLE_ADSETS      || '';
+const TABLE_ADS         = process.env.NOCODB_TABLE_ADS         || '';
+const TABLE_SYNC_LOG    = process.env.NOCODB_TABLE_SYNC_LOG    || 'ma1q0gfm8y5vuvy';
+const TABLE_CRM_LEADS   = process.env.NOCODB_TABLE_CRM_LEADS   || '';
+const TABLE_CRM_STAGES  = process.env.NOCODB_TABLE_CRM_STAGES  || '';
+
+// ─── Lead result types that should create CRM entries ─────────────────────────
+const LEAD_RESULT_TYPES = new Set([
+  'onsite_conversion.messaging_conversation_started_7d',
+  'onsite_conversion.messaging_conversation_started_30d',
+  'onsite_conversion.messaging_conversation_started',
+  'onsite_conversion.lead_grouped',
+  'lead',
+  'complete_registration',
+  'onsite_conversion.subscribe',
+]);
+
+// ─── Auto-import Meta leads → CRM ────────────────────────────────────────────
+/**
+ * For each campaign that had lead-type results on the MOST RECENT day in the
+ * synced data, compare against existing CRM entries and create the difference.
+ * This is idempotent: running multiple times the same day won't duplicate leads.
+ */
+async function importMetaLeadsToCRM(campaigns: DailyMetric[]): Promise<number> {
+  if (!TABLE_CRM_LEADS) return 0;
+
+  // Only lead-type results with at least 1 result
+  const leadMetrics = campaigns.filter(
+    (m) => LEAD_RESULT_TYPES.has(m.result_type) && m.results > 0
+  );
+  if (leadMetrics.length === 0) return 0;
+
+  // Work only on the most recent date (avoid re-importing full history on every sync)
+  const maxDate = leadMetrics.reduce((max, m) => (m.date > max ? m.date : max), '');
+  const dayMetrics = leadMetrics.filter((m) => m.date === maxDate);
+
+  // Get first CRM stage to place new leads into
+  let firstStage = { Id: 1, Nombre: 'Nuevo Lead', Color: '#3b82f6' };
+  if (TABLE_CRM_STAGES) {
+    try {
+      const stages = await listAllRows<{ Id: number; Nombre: string; Color: string; Orden: number }>(
+        NOCODB_PROJECT, TABLE_CRM_STAGES, { sort: 'Orden', limit: '1' }
+      );
+      if (stages.length > 0) firstStage = stages[0];
+    } catch { /* keep default */ }
+  }
+
+  let created = 0;
+  const dayStart = `${maxDate}T00:00:00`;
+  const dayEnd   = `${maxDate}T23:59:59`;
+
+  for (const metric of dayMetrics) {
+    try {
+      // How many CRM leads already exist for this campaign on this date?
+      const existing = await listAllRows<{ Id: number }>(NOCODB_PROJECT, TABLE_CRM_LEADS, {
+        fields: 'Id',
+        where:  `(ID_Campana,eq,${metric.campaign_id})~and(Plataforma_Origen,eq,Meta)~and(Fecha_Creacion,gte,${dayStart})~and(Fecha_Creacion,lte,${dayEnd})`,
+      });
+
+      const toCreate = Math.max(0, metric.results - existing.length);
+      if (toCreate === 0) continue;
+
+      const now = new Date().toISOString();
+      const cpl = metric.results > 0 ? Math.round(metric.spent / metric.results) : 0;
+      const note = [
+        `Importado automáticamente desde Meta Ads el ${maxDate}.`,
+        cpl > 0 ? `Costo por lead: $${cpl.toLocaleString('es-CO')} COP.` : '',
+        `Campaña: ${metric.campaign_name}.`,
+        `Actualiza nombre y teléfono cuando contactes al lead en WhatsApp.`,
+      ].filter(Boolean).join(' ');
+
+      for (let i = 0; i < toCreate; i++) {
+        await insertRow(NOCODB_PROJECT, TABLE_CRM_LEADS, {
+          Nombre:                `Lead WA · ${metric.campaign_name}`,
+          Telefono:              '',
+          Email:                 '',
+          Empresa:               '',
+          Origen:                'Meta Ads',
+          ID_Campana:            metric.campaign_id,
+          Nombre_Campana:        metric.campaign_name,
+          Plataforma_Origen:     'Meta',
+          Valor_Estimado:        0,
+          Stage_Id:              firstStage.Id,
+          Stage_Nombre:          firstStage.Nombre,
+          Stage_Color:           firstStage.Color,
+          Usuario_Id:            1,
+          Usuario_Nombre:        'Sin asignar',
+          Fecha_Creacion:        now,
+          Fecha_Ultimo_Contacto: now,
+          Proxima_Accion_Fecha:  '',
+          Estado:                'abierto',
+          Motivo_Perdida:        '',
+          Notas:                 note,
+          Fecha_Cierre:          '',
+        });
+        created++;
+      }
+
+      console.log(`[sync] CRM: ${toCreate} lead(s) created for campaign "${metric.campaign_name}" (${maxDate})`);
+    } catch (e) {
+      console.warn(`[sync] CRM import failed for campaign ${metric.campaign_id}:`, e);
+    }
+  }
+
+  return created;
+}
 
 // ─── Row mappers ──────────────────────────────────────────────────────────────
 
@@ -176,11 +279,17 @@ export async function POST(req: NextRequest) {
           console.warn('[sync] NOCODB_TABLE_ADS not set — run /api/setup first');
         }
 
+        // Auto-import lead-type results into CRM (idempotent)
+        const crmCreated = await importMetaLeadsToCRM(campaigns).catch((e) => {
+          console.warn('[sync] CRM import error:', e);
+          return 0;
+        });
+
         await logSync('meta', 'exitoso', totalRecords);
         syncedPlatforms.push('meta');
 
         console.log(
-          `[sync] ✓ Meta: campaigns=${campaigns.length}, adSets=${adSets.length}, ads=${ads.length}`
+          `[sync] ✓ Meta: campaigns=${campaigns.length}, adSets=${adSets.length}, ads=${ads.length}${crmCreated > 0 ? `, CRM leads created=${crmCreated}` : ''}`
         );
 
       } else if (platform === 'google' && isGoogleConfigured()) {
