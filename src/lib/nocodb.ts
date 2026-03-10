@@ -145,28 +145,39 @@ export async function insertRow<T>(
   });
 }
 
-/** Bulk insert rows — inserts individually in batches of 10 in parallel */
+/** Bulk insert rows — usa el endpoint nativo de NocoDB para máximo rendimiento */
 export async function bulkInsert<T>(
   projectId: string,
   tableId: string,
   rows: Partial<T>[]
 ): Promise<{ inserted: number }> {
-  const BATCH = 10;
+  if (rows.length === 0) return { inserted: 0 };
+
+  // NocoDB acepta hasta 1000 filas por llamada en el endpoint bulk
+  const CHUNK = 500;
   let inserted = 0;
 
-  for (let i = 0; i < rows.length; i += BATCH) {
-    const batch = rows.slice(i, i + BATCH);
-    await Promise.all(
-      batch.map((row) =>
-        nocoFetch<T>(`${projectId}/${tableId}`, {
-          method: 'POST',
-          body: JSON.stringify(row),
-        })
-      )
-    );
-    inserted += batch.length;
-    if (i % 100 === 0 && i > 0) {
-      console.log(`[nocodb] bulkInsert progress: ${inserted}/${rows.length}`);
+  for (let i = 0; i < rows.length; i += CHUNK) {
+    const chunk = rows.slice(i, i + CHUNK);
+    const url = `${NOCODB_URL}/api/v1/db/data/bulk/noco/${projectId}/${tableId}`;
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'xc-token': NOCODB_API_KEY,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(chunk),
+    });
+
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(`NocoDB bulk insert ${res.status}: ${err.slice(0, 200)}`);
+    }
+
+    inserted += chunk.length;
+    if (rows.length > CHUNK) {
+      console.log(`[nocodb] bulkInsert progreso: ${inserted}/${rows.length}`);
     }
   }
 

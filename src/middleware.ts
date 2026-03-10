@@ -20,6 +20,12 @@ export function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
+  // Permitir llamadas servidor-a-servidor con x-cron-secret
+  const cronSecret = process.env.CRON_SECRET;
+  if (cronSecret && req.headers.get('x-cron-secret') === cronSecret) {
+    return NextResponse.next();
+  }
+
   const user     = process.env.DASHBOARD_USER;
   const password = process.env.DASHBOARD_PASSWORD;
 

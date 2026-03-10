@@ -5,6 +5,7 @@ import { fetchTikTokMetrics, isTikTokConfigured } from '@/lib/integrations/tikto
 import { bulkInsert, insertRow, listAllRows, clearRowsByDateRange } from '@/lib/nocodb';
 import { notifyNewLeads, type LeadNotification } from '@/lib/notify';
 import type { DailyMetric, AdSetMetric, AdMetric, SyncResponse, Platform } from '@/types';
+import { LEAD_RESULT_TYPES } from '@/lib/constants';
 
 const NOCODB_PROJECT    = process.env.NOCODB_PROJECT_ID        || '';
 const TABLE_CAMPAIGNS   = process.env.NOCODB_TABLE_METRICS     || '';
@@ -13,16 +14,6 @@ const TABLE_ADS         = process.env.NOCODB_TABLE_ADS         || '';
 const TABLE_SYNC_LOG    = process.env.NOCODB_TABLE_SYNC_LOG    || '';
 const TABLE_CRM_LEADS   = process.env.NOCODB_TABLE_CRM_LEADS   || '';
 const TABLE_CRM_STAGES  = process.env.NOCODB_TABLE_CRM_STAGES  || '';
-
-// ─── Lead result types that should create CRM entries ─────────────────────────
-// ONLY WhatsApp conversations and Meta Instant Form submissions (native Meta leads)
-const LEAD_RESULT_TYPES = new Set([
-  'onsite_conversion.messaging_conversation_started_7d',
-  'onsite_conversion.messaging_conversation_started_30d',
-  'onsite_conversion.messaging_conversation_started',
-  'onsite_conversion.lead_grouped',
-  'lead',
-]);
 
 // ─── Auto-import Meta leads → CRM ────────────────────────────────────────────
 /**

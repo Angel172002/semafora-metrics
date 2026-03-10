@@ -22,29 +22,7 @@ import type {
   EngagementTableRow,
   FollowerTableRow,
 } from '@/types';
-
-// ─── Result type categories ───────────────────────────────────────────────────
-/** ONLY these count as true conversions (WhatsApp + Meta Instant Form leads) */
-const LEAD_RESULT_TYPES = new Set([
-  'onsite_conversion.messaging_conversation_started_7d',
-  'onsite_conversion.messaging_conversation_started_30d',
-  'onsite_conversion.messaging_conversation_started',
-  'onsite_conversion.lead_grouped',
-  'lead',
-]);
-
-const VIDEO_RESULT_TYPES = new Set([
-  'video_view',
-  'video_thruplay_watched_actions',
-  'video_p100_watched_actions',
-  'video_play_actions',
-]);
-
-const FOLLOWER_RESULT_TYPES = new Set([
-  'like',
-  'follow',
-  'page_like',
-]);
+import { LEAD_RESULT_TYPES, VIDEO_RESULT_TYPES, FOLLOWER_RESULT_TYPES } from '@/lib/constants';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const PLATFORM_COLORS: Record<string, string> = {

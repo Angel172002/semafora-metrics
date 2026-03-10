@@ -13,7 +13,7 @@
 
 import type { DailyMetric, AdSetMetric, AdMetric } from '@/types';
 
-const API_VERSION = process.env.META_API_VERSION || 'v19.0';
+const API_VERSION = process.env.META_API_VERSION || 'v21.0';
 const BASE_URL = `https://graph.facebook.com/${API_VERSION}`;
 
 // Primary result types in priority order — first one with count > 0 wins

@@ -33,7 +33,10 @@ export async function GET(req: NextRequest) {
   try {
     const res = await fetch(`${baseUrl}/api/sync`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(process.env.CRON_SECRET ? { 'x-cron-secret': process.env.CRON_SECRET } : {}),
+      },
       body: JSON.stringify({ platforms: ['meta', 'google', 'tiktok'], days: 30 }),
     });
 
