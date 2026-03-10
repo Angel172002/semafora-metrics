@@ -1,21 +1,25 @@
 /**
- * Next.js Middleware — Basic Auth + cookie de sesión.
+ * Next.js Middleware — Autenticación por cookie de sesión.
  *
  * Flujo:
- * 1. Primera visita → el navegador pide usuario/contraseña (diálogo nativo)
- * 2. Si son correctos → el middleware fija una cookie httpOnly segura
- * 3. Peticiones siguientes (incluyendo fetch() del frontend) → se valida la cookie
- *    sin necesidad de volver a pedir credenciales
- *
- * Variables requeridas:
- *   DASHBOARD_USER     — nombre de usuario
- *   DASHBOARD_PASSWORD — contraseña
+ *   - /login y /api/auth/* → siempre accesibles (sin autenticación)
+ *   - Resto de rutas → requieren cookie de sesión válida
+ *     · Páginas → redirigen a /login
+ *     · API     → devuelven 401 JSON
  */
 import { NextRequest, NextResponse } from 'next/server';
 
-const COOKIE = 'semafora_session';
+const COOKIE     = 'semafora_session';
+const LOGIN_PATH = '/login';
 
 export function middleware(req: NextRequest) {
+  const { pathname } = req.nextUrl;
+
+  // Rutas públicas — siempre accesibles
+  if (pathname === LOGIN_PATH || pathname.startsWith('/api/auth/')) {
+    return NextResponse.next();
+  }
+
   const user     = process.env.DASHBOARD_USER;
   const password = process.env.DASHBOARD_PASSWORD;
 
@@ -26,45 +30,25 @@ export function middleware(req: NextRequest) {
     );
   }
 
-  // Valor esperado de la cookie = base64(user:password)
+  // Verificar cookie de sesión
   const expectedCookie = btoa(`${user}:${password}`);
+  const sessionCookie  = req.cookies.get(COOKIE);
 
-  // 1. Verificar cookie de sesión existente
-  const sessionCookie = req.cookies.get(COOKIE);
   if (sessionCookie?.value === expectedCookie) {
     return NextResponse.next();
   }
 
-  // 2. Verificar cabecera Basic Auth
-  const authHeader = req.headers.get('authorization');
-  if (authHeader?.startsWith('Basic ')) {
-    const base64      = authHeader.slice(6);
-    const decoded     = atob(base64);
-    const colonIndex  = decoded.indexOf(':');
-    const reqUser     = decoded.slice(0, colonIndex);
-    const reqPassword = decoded.slice(colonIndex + 1);
-
-    if (reqUser === user && reqPassword === password) {
-      // Credenciales correctas → establecer cookie de sesión (24 horas)
-      const response = NextResponse.next();
-      response.cookies.set(COOKIE, expectedCookie, {
-        httpOnly: true,
-        secure:   process.env.NODE_ENV === 'production',
-        sameSite: 'lax',
-        maxAge:   60 * 60 * 24,
-        path:     '/',
-      });
-      return response;
-    }
+  // Sin sesión válida:
+  // - Rutas API → 401 JSON
+  // - Páginas   → redirect a /login
+  if (pathname.startsWith('/api/')) {
+    return NextResponse.json({ error: 'No autorizado', redirectTo: LOGIN_PATH }, { status: 401 });
   }
 
-  // 3. Sin credenciales válidas → pedir autenticación
-  return new NextResponse('No autorizado', {
-    status: 401,
-    headers: {
-      'WWW-Authenticate': 'Basic realm="Semafora Metrics", charset="UTF-8"',
-    },
-  });
+  const loginUrl = req.nextUrl.clone();
+  loginUrl.pathname = LOGIN_PATH;
+  loginUrl.searchParams.set('from', pathname);
+  return NextResponse.redirect(loginUrl);
 }
 
 export const config = {

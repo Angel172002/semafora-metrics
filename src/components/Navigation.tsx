@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { useState } from 'react';
 
 const NAV_ITEMS = [
@@ -52,9 +52,18 @@ const NAV_ITEMS = [
   },
 ];
 
+async function handleLogout(router: ReturnType<typeof useRouter>) {
+  await fetch('/api/auth/logout', { method: 'POST' });
+  router.push('/login');
+}
+
 export default function Navigation() {
   const pathname = usePathname();
+  const router   = useRouter();
   const [collapsed, setCollapsed] = useState(false);
+
+  // No mostrar navegación en la pantalla de login
+  if (pathname === '/login') return null;
 
   return (
     <>
@@ -112,12 +121,22 @@ export default function Navigation() {
           })}
         </nav>
 
-        {/* Bottom: theme info */}
-        {!collapsed && (
-          <div className="px-4 py-3 border-t border-[var(--border)]">
-            <p className="text-[10px] text-[var(--muted)] uppercase tracking-wider">v1.0 · Metrics + CRM</p>
-          </div>
-        )}
+        {/* Bottom: logout + version */}
+        <div className="px-2 py-3 border-t border-[var(--border)] space-y-1">
+          <button
+            onClick={() => handleLogout(router)}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150 text-[var(--muted)] hover:text-red-400 hover:bg-red-500/10"
+            title={collapsed ? 'Cerrar sesión' : undefined}
+          >
+            <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} className="flex-shrink-0">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+            </svg>
+            {!collapsed && <span>Cerrar sesión</span>}
+          </button>
+          {!collapsed && (
+            <p className="text-[10px] text-[var(--muted2)] uppercase tracking-wider px-3">v1.0 · Metrics + CRM</p>
+          )}
+        </div>
       </aside>
 
       {/* Mobile bottom nav */}
