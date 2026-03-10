@@ -76,23 +76,43 @@ interface GoogleAdsSearchResponse {
 
 // ─── Auth: get OAuth2 access token ────────────────────────────────────────────
 async function getAccessToken(): Promise<string> {
+  const clientId     = process.env.GOOGLE_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+  const refreshToken = process.env.GOOGLE_REFRESH_TOKEN;
+
+  if (!clientId || !clientSecret || !refreshToken) {
+    throw new Error(
+      'Google OAuth: faltan credenciales. Verifica GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET y GOOGLE_REFRESH_TOKEN en las variables de entorno.'
+    );
+  }
+
   const res = await fetch(TOKEN_URL, {
     method:  'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body:    new URLSearchParams({
-      client_id:     process.env.GOOGLE_CLIENT_ID!,
-      client_secret: process.env.GOOGLE_CLIENT_SECRET!,
-      refresh_token: process.env.GOOGLE_REFRESH_TOKEN!,
+      client_id:     clientId,
+      client_secret: clientSecret,
+      refresh_token: refreshToken,
       grant_type:    'refresh_token',
     }),
   });
 
   if (!res.ok) {
     const err = await res.text();
-    throw new Error(`Google OAuth error ${res.status}: ${err}`);
+    // Detect common OAuth errors and give clear messages
+    if (err.includes('invalid_grant')) {
+      throw new Error('Google OAuth: refresh token inválido o expirado. Regenera el GOOGLE_REFRESH_TOKEN.');
+    }
+    if (err.includes('invalid_client')) {
+      throw new Error('Google OAuth: client_id o client_secret incorrectos. Verifica en Google Cloud Console.');
+    }
+    throw new Error(`Google OAuth error ${res.status}: ${err.slice(0, 300)}`);
   }
 
   const json: GoogleTokenResponse = await res.json();
+  if (!json.access_token) {
+    throw new Error('Google OAuth: respuesta sin access_token. Verifica las credenciales.');
+  }
   return json.access_token;
 }
 
@@ -103,7 +123,10 @@ async function gaqlQuery<T>(
   query:       string,
 ): Promise<T[]> {
   const url     = `${API_BASE}/customers/${customerId}/googleAds:search`;
-  const devToken = process.env.GOOGLE_DEVELOPER_TOKEN!;
+  const devToken = process.env.GOOGLE_DEVELOPER_TOKEN;
+  if (!devToken) {
+    throw new Error('Google Ads: falta GOOGLE_DEVELOPER_TOKEN. Obténlo en Google Ads API Center.');
+  }
   const loginId  = process.env.GOOGLE_LOGIN_CUSTOMER_ID || '';
 
   const headers: Record<string, string> = {
@@ -171,36 +194,60 @@ async function fetchCampaignMetrics(
 
   const rows = await gaqlQuery<GoogleCampaignRow>(customerId, accessToken, query);
 
-  return rows.map((row) => {
+  // Aggregate rows by campaign_id + date (Google returns one row per network per day)
+  const agg = new Map<string, {
+    campaign_id: string; campaign_name: string; date: string;
+    impressions: number; clicks: number; conversions: number;
+    spent: number; videoViews: number;
+  }>();
+
+  for (const row of rows) {
+    const key = `${row.campaign.id}__${row.segments.date}`;
+    const existing = agg.get(key);
     const conversions = parseFloat(row.metrics.conversions) || 0;
     const spent       = (parseInt(row.metrics.costMicros)   || 0) / 1_000_000;
     const clicks      = parseInt(row.metrics.clicks)         || 0;
     const impressions = parseInt(row.metrics.impressions)    || 0;
     const videoViews  = parseInt(row.metrics.videoViews)     || 0;
-    const networkKey  = NETWORK_KEY[row.segments.adNetworkType] || 'google';
-    const cpm = impressions > 0 ? parseFloat((spent / impressions * 1000).toFixed(2)) : 0;
-    const cpc = clicks      > 0 ? parseFloat((spent / clicks).toFixed(2))              : 0;
+    if (!existing) {
+      agg.set(key, {
+        campaign_id:   row.campaign.id,
+        campaign_name: row.campaign.name,
+        date:          row.segments.date,
+        impressions, clicks, conversions, spent, videoViews,
+      });
+    } else {
+      existing.impressions += impressions;
+      existing.clicks      += clicks;
+      existing.conversions += conversions;
+      existing.spent       += spent;
+      existing.videoViews  += videoViews;
+    }
+  }
 
+  return Array.from(agg.values()).map((r) => {
+    const cpm = r.impressions > 0 ? parseFloat((r.spent / r.impressions * 1000).toFixed(2)) : 0;
+    const cpc = r.clicks      > 0 ? parseFloat((r.spent / r.clicks).toFixed(2))              : 0;
     return {
-      campaign_id:     row.campaign.id,
-      campaign_name:   row.campaign.name,
+      campaign_id:     r.campaign_id,
+      campaign_name:   r.campaign_name,
       platform:        'google' as Platform,
-      date:            row.segments.date,
-      impressions,
-      clicks,
-      results:         conversions,
-      conversions,
-      result_type:     networkKey,           // used as result_type key for badge
+      date:            r.date,
+      impressions:     r.impressions,
+      clicks:          r.clicks,
+      results:         r.conversions,
+      conversions:     r.conversions,
+      result_type:     'conversion',          // Google conversions tracked as "conversion" type
       likes:           0,
       shares:          0,
       comments:        0,
-      video_plays:     videoViews,
-      spent,
-      reach:           impressions,          // Google Search has no unique-reach — use impressions
+      video_plays:     r.videoViews,
+      spent:           r.spent,
+      reach:           r.impressions,         // Google Search has no unique-reach — use impressions
       frequency:       1,
       cpm,
       cpc,
-      cost_per_result: conversions > 0 ? parseFloat((spent / conversions).toFixed(2)) : 0,
+      cost_per_result: r.conversions > 0 ? parseFloat((r.spent / r.conversions).toFixed(2)) : 0,
     };
   });
 }
@@ -253,7 +300,7 @@ async function fetchAdGroupMetrics(
       impressions,
       clicks,
       results:         conversions,
-      result_type:     networkKey,
+      result_type:     'conversion',
       spent,
       reach:           impressions,
       frequency:       1,
@@ -322,7 +369,7 @@ async function fetchAdLevelMetrics(
       impressions,
       clicks,
       results:         conversions,
-      result_type:     networkKey,
+      result_type:     'conversion',
       spent,
       reach:           impressions,
       frequency:       1,

@@ -72,12 +72,15 @@ const NETWORK_COLORS: Record<string, string> = {
 };
 
 // ─── Deduplication ────────────────────────────────────────────────────────────
-/** Remove duplicate rows for the same campaign+date, keeping the most recently inserted (highest Id).
- *  Safety net: handles the case where the cron re-inserts data already in the DB. */
+/**
+ * Remove duplicate rows for the same campaign+platform+date.
+ * Key includes platform to avoid collisions between platforms.
+ * Keeps the row with highest Id (most recently inserted).
+ */
 function deduplicateCampaigns(metrics: DailyMetric[]): DailyMetric[] {
   const best = new Map<string, DailyMetric>();
   for (const m of metrics) {
-    const key = `${m.campaign_id}__${m.date}`;
+    const key = `${m.platform}__${m.campaign_id}__${m.date}`;
     const prev = best.get(key);
     if (!prev || (m.id ?? 0) > (prev.id ?? 0)) best.set(key, m);
   }
@@ -87,7 +90,7 @@ function deduplicateCampaigns(metrics: DailyMetric[]): DailyMetric[] {
 function deduplicateAdSets(items: AdSetMetric[]): AdSetMetric[] {
   const best = new Map<string, AdSetMetric>();
   for (const m of items) {
-    const key = `${m.adset_id}__${m.date}__${m.network}`;
+    const key = `${m.platform}__${m.adset_id}__${m.date}__${m.network}`;
     const prev = best.get(key);
     if (!prev || (m.id ?? 0) > (prev.id ?? 0)) best.set(key, m);
   }
@@ -97,7 +100,7 @@ function deduplicateAdSets(items: AdSetMetric[]): AdSetMetric[] {
 function deduplicateAds(items: AdMetric[]): AdMetric[] {
   const best = new Map<string, AdMetric>();
   for (const m of items) {
-    const key = `${m.ad_id}__${m.date}__${m.network}`;
+    const key = `${m.platform}__${m.ad_id}__${m.date}__${m.network}`;
     const prev = best.get(key);
     if (!prev || (m.id ?? 0) > (prev.id ?? 0)) best.set(key, m);
   }
@@ -112,7 +115,10 @@ function formatDay(dateStr: string): string {
 }
 
 function getDaysBack(range: DateRange): number {
-  return range === '7d' ? 7 : range === '30d' ? 30 : 90;
+  if (range === '7d')  return 7;
+  if (range === '30d') return 30;
+  if (range === '90d') return 90;
+  return 0; // 'all' — no limit (filterByRange and getPreviousPeriod handle 'all' separately)
 }
 
 function filterByRange<T extends { date: string }>(items: T[], range: DateRange): T[] {

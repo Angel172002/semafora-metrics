@@ -26,6 +26,8 @@ interface TikTokMetrics {
   likes: string;
   shares: string;
   comments: string;
+  video_play_actions: string;
+  video_views_p100: string;
 }
 
 interface TikTokRow {
@@ -60,6 +62,8 @@ export async function fetchTikTokMetrics(
       'likes',
       'shares',
       'comments',
+      'video_play_actions',
+      'video_views_p100',
     ]),
     data_level: 'AUCTION_CAMPAIGN',
     start_date: dateRange.since,
@@ -97,7 +101,7 @@ export async function fetchTikTokMetrics(
       likes: parseInt(row.metrics.likes) || 0,
       shares: parseInt(row.metrics.shares) || 0,
       comments: parseInt(row.metrics.comments) || 0,
-      video_plays: 0,
+      video_plays: parseInt(row.metrics.video_play_actions) || parseInt(row.metrics.video_views_p100) || 0,
       spent,
       reach: parseInt(row.metrics.reach) || 0,
       frequency: 0,
