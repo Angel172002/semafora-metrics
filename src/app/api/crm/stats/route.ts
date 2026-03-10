@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { listAllRows } from '@/lib/nocodb';
 import type { CrmLead, CrmStats } from '@/types';
 
-const PROJECT = process.env.NOCODB_PROJECT_ID      || 'p0txioylznnyf39';
+const PROJECT = process.env.NOCODB_PROJECT_ID      || '';
 const TABLE   = process.env.NOCODB_TABLE_CRM_LEADS || '';
 
 export async function GET() {
