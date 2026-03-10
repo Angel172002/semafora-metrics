@@ -259,6 +259,38 @@ export async function clearRowsWhere(
   return deleted;
 }
 
+/** Delete rows where Plataforma = platform AND Fecha is within [since, until] */
+export async function clearRowsByDateRange(
+  projectId: string,
+  tableId: string,
+  platform: string,
+  since: string,
+  until: string,
+): Promise<number> {
+  let deleted = 0;
+  let hasMore = true;
+  const where = `(Plataforma,eq,${platform})~and(Fecha,gte,${since})~and(Fecha,lte,${until})`;
+
+  while (hasMore) {
+    const rows = await listRows<{ Id: number }>(projectId, tableId, {
+      limit: '100',
+      fields: 'Id',
+      where,
+    });
+    if (!rows.length) { hasMore = false; break; }
+
+    await Promise.all(
+      rows.map((row) =>
+        nocoFetch<unknown>(`${projectId}/${tableId}/${row.Id}`, { method: 'DELETE' }).catch(() => null)
+      )
+    );
+    deleted += rows.length;
+    if (rows.length < 100) hasMore = false;
+  }
+  console.log(`[nocodb] clearByDateRange (${platform}, ${since}→${until}): deleted ${deleted}`);
+  return deleted;
+}
+
 // ─── Meta API: create table ───────────────────────────────────────────────────
 
 /** Create a new NocoDB table and return its ID */
@@ -328,6 +360,7 @@ export default {
   updateRow,
   clearTable,
   clearRowsWhere,
+  clearRowsByDateRange,
   createTable,
   addColumn,
   checkNocoDBConnection,

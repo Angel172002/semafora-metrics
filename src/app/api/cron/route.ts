@@ -9,14 +9,19 @@ import { NextRequest, NextResponse } from 'next/server';
  * Vercel passes: Authorization: Bearer <CRON_SECRET>
  */
 export async function GET(req: NextRequest) {
-  // ── Security check ──────────────────────────────────────────────────────────
+  // ── Security check — CRON_SECRET es obligatorio ──────────────────────────
   const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret) {
-    const authHeader = req.headers.get('authorization');
-    const token = authHeader?.replace('Bearer ', '');
-    if (token !== cronSecret) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+  if (!cronSecret) {
+    return NextResponse.json(
+      { error: 'CRON_SECRET no configurado. Agrega esta variable en Vercel y en .env.local.' },
+      { status: 500 }
+    );
+  }
+
+  const authHeader = req.headers.get('authorization');
+  const token = authHeader?.replace('Bearer ', '');
+  if (token !== cronSecret) {
+    return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
   }
 
   // ── Resolve base URL ────────────────────────────────────────────────────────
@@ -29,7 +34,7 @@ export async function GET(req: NextRequest) {
     const res = await fetch(`${baseUrl}/api/sync`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ platforms: ['meta', 'google', 'tiktok'], days: 7 }),
+      body: JSON.stringify({ platforms: ['meta', 'google', 'tiktok'], days: 30 }),
     });
 
     const data = await res.json();

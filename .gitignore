@@ -15,6 +15,13 @@ out/
 .DS_Store
 *.pem
 Thumbs.db
+nul
+
+# Scripts locales de debug/utilidad — contienen credenciales hardcodeadas
+scripts/
+analyze-excel.js
+test-google-direct.js
+run-sync-direct.js
 
 # TypeScript
 *.tsbuildinfo
@@ -22,3 +29,5 @@ next-env.d.ts
 
 # Logs
 *.log
+
+.vercel

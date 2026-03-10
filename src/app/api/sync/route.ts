@@ -2,26 +2,26 @@ import { NextRequest, NextResponse } from 'next/server';
 import { fetchAllMetaAccounts, isMetaConfigured } from '@/lib/integrations/meta';
 import { fetchAllGoogleAccounts, isGoogleConfigured } from '@/lib/integrations/google';
 import { fetchTikTokMetrics, isTikTokConfigured } from '@/lib/integrations/tiktok';
-import { bulkInsert, insertRow, listAllRows, clearRowsWhere } from '@/lib/nocodb';
+import { bulkInsert, insertRow, listAllRows, clearRowsByDateRange } from '@/lib/nocodb';
+import { notifyNewLeads, type LeadNotification } from '@/lib/notify';
 import type { DailyMetric, AdSetMetric, AdMetric, SyncResponse, Platform } from '@/types';
 
-const NOCODB_PROJECT    = process.env.NOCODB_PROJECT_ID        || 'p0txioylznnyf39';
-const TABLE_CAMPAIGNS   = process.env.NOCODB_TABLE_METRICS     || 'mgp8sapw27x0zqv';
+const NOCODB_PROJECT    = process.env.NOCODB_PROJECT_ID        || '';
+const TABLE_CAMPAIGNS   = process.env.NOCODB_TABLE_METRICS     || '';
 const TABLE_ADSETS      = process.env.NOCODB_TABLE_ADSETS      || '';
 const TABLE_ADS         = process.env.NOCODB_TABLE_ADS         || '';
-const TABLE_SYNC_LOG    = process.env.NOCODB_TABLE_SYNC_LOG    || 'ma1q0gfm8y5vuvy';
+const TABLE_SYNC_LOG    = process.env.NOCODB_TABLE_SYNC_LOG    || '';
 const TABLE_CRM_LEADS   = process.env.NOCODB_TABLE_CRM_LEADS   || '';
 const TABLE_CRM_STAGES  = process.env.NOCODB_TABLE_CRM_STAGES  || '';
 
 // ─── Lead result types that should create CRM entries ─────────────────────────
+// ONLY WhatsApp conversations and Meta Instant Form submissions (native Meta leads)
 const LEAD_RESULT_TYPES = new Set([
   'onsite_conversion.messaging_conversation_started_7d',
   'onsite_conversion.messaging_conversation_started_30d',
   'onsite_conversion.messaging_conversation_started',
   'onsite_conversion.lead_grouped',
   'lead',
-  'complete_registration',
-  'onsite_conversion.subscribe',
 ]);
 
 // ─── Auto-import Meta leads → CRM ────────────────────────────────────────────
@@ -29,19 +29,19 @@ const LEAD_RESULT_TYPES = new Set([
  * For each campaign that had lead-type results on the MOST RECENT day in the
  * synced data, compare against existing CRM entries and create the difference.
  * This is idempotent: running multiple times the same day won't duplicate leads.
+ * Returns the list of created lead notifications for downstream alerting.
  */
-async function importMetaLeadsToCRM(campaigns: DailyMetric[]): Promise<number> {
-  if (!TABLE_CRM_LEADS) return 0;
+async function importMetaLeadsToCRM(campaigns: DailyMetric[]): Promise<LeadNotification[]> {
+  if (!TABLE_CRM_LEADS) return [];
 
   // Only lead-type results with at least 1 result
   const leadMetrics = campaigns.filter(
     (m) => LEAD_RESULT_TYPES.has(m.result_type) && m.results > 0
   );
-  if (leadMetrics.length === 0) return 0;
+  if (leadMetrics.length === 0) return [];
 
-  // Work only on the most recent date (avoid re-importing full history on every sync)
-  const maxDate = leadMetrics.reduce((max, m) => (m.date > max ? m.date : max), '');
-  const dayMetrics = leadMetrics.filter((m) => m.date === maxDate);
+  // Process ALL dates (idempotent: we check existing CRM leads per campaign per day)
+  const dayMetrics = leadMetrics;
 
   // Get first CRM stage to place new leads into
   let firstStage = { Id: 1, Nombre: 'Nuevo Lead', Color: '#3b82f6' };
@@ -54,32 +54,32 @@ async function importMetaLeadsToCRM(campaigns: DailyMetric[]): Promise<number> {
     } catch { /* keep default */ }
   }
 
-  let created = 0;
-  const dayStart = `${maxDate}T00:00:00`;
-  const dayEnd   = `${maxDate}T23:59:59`;
+  const created: LeadNotification[] = [];
 
   for (const metric of dayMetrics) {
     try {
       // How many CRM leads already exist for this campaign on this date?
+      // Uses Dia_Import (SingleLineText YYYY-MM-DD) — avoids NocoDB datetime range limitations
       const existing = await listAllRows<{ Id: number }>(NOCODB_PROJECT, TABLE_CRM_LEADS, {
         fields: 'Id',
-        where:  `(ID_Campana,eq,${metric.campaign_id})~and(Plataforma_Origen,eq,Meta)~and(Fecha_Creacion,gte,${dayStart})~and(Fecha_Creacion,lte,${dayEnd})`,
+        where:  `(ID_Campana,eq,${metric.campaign_id})~and(Plataforma_Origen,eq,Meta)~and(Dia_Import,eq,${metric.date})`,
       });
 
       const toCreate = Math.max(0, metric.results - existing.length);
       if (toCreate === 0) continue;
 
-      const now = new Date().toISOString();
+      // NocoDB DateTime fields require "YYYY-MM-DD HH:MM:SS" format (no Z, no ms)
+      const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
       const cpl = metric.results > 0 ? Math.round(metric.spent / metric.results) : 0;
       const note = [
-        `Importado automáticamente desde Meta Ads el ${maxDate}.`,
+        `Importado automáticamente desde Meta Ads el ${metric.date}.`,
         cpl > 0 ? `Costo por lead: $${cpl.toLocaleString('es-CO')} COP.` : '',
         `Campaña: ${metric.campaign_name}.`,
         `Actualiza nombre y teléfono cuando contactes al lead en WhatsApp.`,
       ].filter(Boolean).join(' ');
 
       for (let i = 0; i < toCreate; i++) {
-        await insertRow(NOCODB_PROJECT, TABLE_CRM_LEADS, {
+        const row = await insertRow(NOCODB_PROJECT, TABLE_CRM_LEADS, {
           Nombre:                `Lead WA · ${metric.campaign_name}`,
           Telefono:              '',
           Email:                 '',
@@ -88,6 +88,7 @@ async function importMetaLeadsToCRM(campaigns: DailyMetric[]): Promise<number> {
           ID_Campana:            metric.campaign_id,
           Nombre_Campana:        metric.campaign_name,
           Plataforma_Origen:     'Meta',
+          Dia_Import:            metric.date,
           Valor_Estimado:        0,
           Stage_Id:              firstStage.Id,
           Stage_Nombre:          firstStage.Nombre,
@@ -96,16 +97,26 @@ async function importMetaLeadsToCRM(campaigns: DailyMetric[]): Promise<number> {
           Usuario_Nombre:        'Sin asignar',
           Fecha_Creacion:        now,
           Fecha_Ultimo_Contacto: now,
-          Proxima_Accion_Fecha:  '',
+          Proxima_Accion_Fecha:  null,
           Estado:                'abierto',
           Motivo_Perdida:        '',
           Notas:                 note,
-          Fecha_Cierre:          '',
+          Fecha_Cierre:          null,
+        }) as { Id?: number } | void;
+
+        created.push({
+          leadId:       (row as { Id?: number })?.Id ?? 0,
+          nombre:       `Lead WA · ${metric.campaign_name}`,
+          campaña:      metric.campaign_name,
+          plataforma:   'Meta',
+          stageName:    firstStage.Nombre,
+          cpl,
+          fecha:        now,
+          totalCreated: toCreate,
         });
-        created++;
       }
 
-      console.log(`[sync] CRM: ${toCreate} lead(s) created for campaign "${metric.campaign_name}" (${maxDate})`);
+      console.log(`[sync] CRM: ${toCreate} lead(s) created for campaign "${metric.campaign_name}" (${metric.date})`);
     } catch (e) {
       console.warn(`[sync] CRM import failed for campaign ${metric.campaign_id}:`, e);
     }
@@ -230,6 +241,13 @@ function getDateRange(body: {
 
 // ─── POST /api/sync ────────────────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
+  if (!NOCODB_PROJECT || !TABLE_CAMPAIGNS) {
+    return NextResponse.json(
+      { success: false, error: 'NocoDB no configurado. Revisa NOCODB_PROJECT_ID y NOCODB_TABLE_METRICS.' },
+      { status: 503 }
+    );
+  }
+
   const body = await req.json().catch(() => ({}));
   const platforms: (Platform | 'all')[] = body.platforms || ['meta', 'google', 'tiktok'];
   const dateRange = getDateRange(body);
@@ -239,17 +257,18 @@ export async function POST(req: NextRequest) {
   console.log(`[sync] Platforms: ${platforms.join(', ')} | clearFirst: ${clearFirst}`);
 
   let totalRecords = 0;
+  let totalCrmLeads = 0;
   const syncedPlatforms: string[] = [];
   const errors: string[] = [];
 
   for (const platform of platforms) {
     try {
       if (platform === 'meta' && isMetaConfigured()) {
-        // Always clear Meta rows before inserting — prevents data duplication on re-syncs
-        console.log('[sync] Clearing existing Meta data...');
-        await clearRowsWhere(NOCODB_PROJECT, TABLE_CAMPAIGNS, 'Plataforma', 'meta').catch(console.warn);
-        if (TABLE_ADSETS) await clearRowsWhere(NOCODB_PROJECT, TABLE_ADSETS, 'Plataforma', 'meta').catch(console.warn);
-        if (TABLE_ADS)    await clearRowsWhere(NOCODB_PROJECT, TABLE_ADS,    'Plataforma', 'meta').catch(console.warn);
+        // Clear only the date range being synced — historical data outside the window is preserved
+        console.log(`[sync] Clearing Meta data for ${dateRange.since} → ${dateRange.until}...`);
+        await clearRowsByDateRange(NOCODB_PROJECT, TABLE_CAMPAIGNS, 'meta', dateRange.since, dateRange.until).catch(console.warn);
+        if (TABLE_ADSETS) await clearRowsByDateRange(NOCODB_PROJECT, TABLE_ADSETS, 'meta', dateRange.since, dateRange.until).catch(console.warn);
+        if (TABLE_ADS)    await clearRowsByDateRange(NOCODB_PROJECT, TABLE_ADS,    'meta', dateRange.since, dateRange.until).catch(console.warn);
 
         // Fetch all 3 levels
         const { campaigns, adSets, ads } = await fetchAllMetaAccounts(dateRange);
@@ -280,24 +299,30 @@ export async function POST(req: NextRequest) {
         }
 
         // Auto-import lead-type results into CRM (idempotent)
-        const crmCreated = await importMetaLeadsToCRM(campaigns).catch((e) => {
+        const newLeads = await importMetaLeadsToCRM(campaigns).catch((e) => {
           console.warn('[sync] CRM import error:', e);
-          return 0;
+          return [] as LeadNotification[];
         });
+
+        // Fire notifications if new leads were created
+        if (newLeads.length > 0) {
+          totalCrmLeads += newLeads.length;
+          notifyNewLeads(newLeads).catch(console.warn); // fire-and-forget
+        }
 
         await logSync('meta', 'exitoso', totalRecords);
         syncedPlatforms.push('meta');
 
         console.log(
-          `[sync] ✓ Meta: campaigns=${campaigns.length}, adSets=${adSets.length}, ads=${ads.length}${crmCreated > 0 ? `, CRM leads created=${crmCreated}` : ''}`
+          `[sync] ✓ Meta: campaigns=${campaigns.length}, adSets=${adSets.length}, ads=${ads.length}${newLeads.length > 0 ? `, CRM leads created=${newLeads.length}` : ''}`
         );
 
       } else if (platform === 'google' && isGoogleConfigured()) {
-        // Always clear Google rows before inserting
-        console.log('[sync] Clearing existing Google data...');
-        await clearRowsWhere(NOCODB_PROJECT, TABLE_CAMPAIGNS, 'Plataforma', 'google').catch(console.warn);
-        if (TABLE_ADSETS) await clearRowsWhere(NOCODB_PROJECT, TABLE_ADSETS, 'Plataforma', 'google').catch(console.warn);
-        if (TABLE_ADS)    await clearRowsWhere(NOCODB_PROJECT, TABLE_ADS,    'Plataforma', 'google').catch(console.warn);
+        // Clear only the date range being synced — historical data outside the window is preserved
+        console.log(`[sync] Clearing Google data for ${dateRange.since} → ${dateRange.until}...`);
+        await clearRowsByDateRange(NOCODB_PROJECT, TABLE_CAMPAIGNS, 'google', dateRange.since, dateRange.until).catch(console.warn);
+        if (TABLE_ADSETS) await clearRowsByDateRange(NOCODB_PROJECT, TABLE_ADSETS, 'google', dateRange.since, dateRange.until).catch(console.warn);
+        if (TABLE_ADS)    await clearRowsByDateRange(NOCODB_PROJECT, TABLE_ADS,    'google', dateRange.since, dateRange.until).catch(console.warn);
 
         const { campaigns: gCampaigns, adGroups, ads: gAds } = await fetchAllGoogleAccounts(dateRange);
 
@@ -329,11 +354,11 @@ export async function POST(req: NextRequest) {
         );
 
       } else if (platform === 'tiktok' && isTikTokConfigured()) {
-        // Always clear TikTok rows before inserting
-        console.log('[sync] Clearing existing TikTok data...');
-        await clearRowsWhere(NOCODB_PROJECT, TABLE_CAMPAIGNS, 'Plataforma', 'tiktok').catch(console.warn);
-        if (TABLE_ADSETS) await clearRowsWhere(NOCODB_PROJECT, TABLE_ADSETS, 'Plataforma', 'tiktok').catch(console.warn);
-        if (TABLE_ADS)    await clearRowsWhere(NOCODB_PROJECT, TABLE_ADS,    'Plataforma', 'tiktok').catch(console.warn);
+        // Clear only the date range being synced — historical data outside the window is preserved
+        console.log(`[sync] Clearing TikTok data for ${dateRange.since} → ${dateRange.until}...`);
+        await clearRowsByDateRange(NOCODB_PROJECT, TABLE_CAMPAIGNS, 'tiktok', dateRange.since, dateRange.until).catch(console.warn);
+        if (TABLE_ADSETS) await clearRowsByDateRange(NOCODB_PROJECT, TABLE_ADSETS, 'tiktok', dateRange.since, dateRange.until).catch(console.warn);
+        if (TABLE_ADS)    await clearRowsByDateRange(NOCODB_PROJECT, TABLE_ADS,    'tiktok', dateRange.since, dateRange.until).catch(console.warn);
 
         const metrics = await fetchTikTokMetrics(
           process.env.TIKTOK_ACCESS_TOKEN!,
@@ -362,11 +387,12 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const response: SyncResponse = {
-    success:   errors.length === 0,
-    synced:    totalRecords,
-    platforms: syncedPlatforms,
-    error:     errors.length > 0 ? errors.join('; ') : undefined,
+  const response: SyncResponse & { crmLeadsCreated?: number } = {
+    success:         errors.length === 0,
+    synced:          totalRecords,
+    platforms:       syncedPlatforms,
+    crmLeadsCreated: totalCrmLeads > 0 ? totalCrmLeads : undefined,
+    error:           errors.length > 0 ? errors.join('; ') : undefined,
   };
 
   return NextResponse.json(response, {

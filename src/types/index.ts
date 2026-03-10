@@ -136,6 +136,7 @@ export interface DailyChartPoint {
   likes: number;
   impressions: number;
   reach: number;
+  cpl: number;                    // cost per lead that day (spent / lead results)
 }
 
 export interface CampaignChartItem {
@@ -221,6 +222,32 @@ export interface NetworkBreakdownItem {
   color: string;
 }
 
+export interface EngagementTableRow {
+  id: string;
+  name: string;
+  platform: Platform;
+  result_type: string;
+  likes: number;
+  comments: number;
+  shares: number;
+  video_views: number;
+  reach: number;
+  impressions: number;
+  spent: number;
+}
+
+export interface FollowerTableRow {
+  id: string;
+  name: string;
+  platform: Platform;
+  result_type: string;
+  followers_gained: number;
+  reach: number;
+  impressions: number;
+  spent: number;
+  cost_per_follower: number;
+}
+
 export interface DashboardData {
   kpis: KpiSummary;
   dailyChart: DailyChartPoint[];
@@ -230,6 +257,8 @@ export interface DashboardData {
   adSetsTable: AdSetTableRow[];
   adsTable: AdTableRow[];
   networkBreakdown: NetworkBreakdownItem[];
+  engagementTable: EngagementTableRow[];
+  followerTable: FollowerTableRow[];
   lastSync: string | null;
   isMockData: boolean;
 }

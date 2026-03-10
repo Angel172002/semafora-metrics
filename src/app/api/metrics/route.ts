@@ -11,11 +11,11 @@ import type {
   Platform,
 } from '@/types';
 
-const NOCODB_PROJECT  = process.env.NOCODB_PROJECT_ID     || 'p0txioylznnyf39';
-const TABLE_CAMPAIGNS = process.env.NOCODB_TABLE_METRICS  || 'mgp8sapw27x0zqv';
+const NOCODB_PROJECT  = process.env.NOCODB_PROJECT_ID     || '';
+const TABLE_CAMPAIGNS = process.env.NOCODB_TABLE_METRICS  || '';
 const TABLE_ADSETS    = process.env.NOCODB_TABLE_ADSETS   || '';
 const TABLE_ADS       = process.env.NOCODB_TABLE_ADS      || '';
-const TABLE_SYNC_LOG  = process.env.NOCODB_TABLE_SYNC_LOG || 'ma1q0gfm8y5vuvy';
+const TABLE_SYNC_LOG  = process.env.NOCODB_TABLE_SYNC_LOG || '';
 
 // ─── NocoDB row interfaces ─────────────────────────────────────────────────────
 interface NocoCampaignRow {

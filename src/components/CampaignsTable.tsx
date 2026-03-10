@@ -28,7 +28,6 @@ interface ResultBadge { label: string; color: string; bg: string }
 
 function getResultBadge(t: string): ResultBadge {
   if (!t) return { label: 'Sin resultado', color: '#6b7280', bg: '#6b728020' };
-  // Meta
   if (t.includes('messaging_conversation'))
     return { label: 'WhatsApp', color: '#25D366', bg: '#25D36618' };
   if (t.includes('lead_grouped') || t === 'lead')
@@ -41,7 +40,6 @@ function getResultBadge(t: string): ResultBadge {
     return { label: 'Registro', color: '#ec4899', bg: '#ec489918' };
   if (t.includes('post_engagement') || t.includes('engagement'))
     return { label: 'Interacción', color: '#f59e0b', bg: '#f59e0b18' };
-  // Google
   if (t === 'google_search')
     return { label: 'G. Búsqueda', color: '#4285F4', bg: '#4285F418' };
   if (t === 'google_display')
@@ -50,13 +48,11 @@ function getResultBadge(t: string): ResultBadge {
     return { label: 'YouTube', color: '#FF0000', bg: '#FF000018' };
   if (t === 'google' || t.startsWith('google'))
     return { label: 'Google', color: '#4285F4', bg: '#4285F418' };
-  // Generic video
   if (t.includes('video'))
     return { label: 'Video', color: '#a855f7', bg: '#a855f718' };
   return { label: t.split('.').pop() || t, color: '#6b7280', bg: '#6b728020' };
 }
 
-// ─── Filter key helper ─────────────────────────────────────────────────────────
 function getFilterKey(t: string): string {
   if (!t) return 'sin_resultado';
   if (t.includes('messaging_conversation')) return 'whatsapp';
@@ -72,21 +68,12 @@ function getFilterKey(t: string): string {
 }
 
 const FILTER_LABELS: Record<string, string> = {
-  all:            'Todas',
-  whatsapp:       'WhatsApp',
-  lead:           'Leads',
-  landing:        'Landing',
-  video:          'Video',
-  interaccion:    'Interacción',
-  sin_resultado:  'Sin resultado',
-  google_search:  'G. Búsqueda',
-  google_display: 'G. Display',
-  google_video:   'YouTube',
-  google:         'Google',
-  otro:           'Otro',
+  all: 'Todas', whatsapp: 'WhatsApp', lead: 'Leads', landing: 'Landing',
+  video: 'Video', interaccion: 'Interacción', sin_resultado: 'Sin resultado',
+  google_search: 'G. Búsqueda', google_display: 'G. Display', google_video: 'YouTube',
+  google: 'Google', otro: 'Otro',
 };
 
-// ─── Legend ────────────────────────────────────────────────────────────────────
 const LEGEND_ITEMS = [
   { key: 'whatsapp',       label: 'WhatsApp',       color: '#25D366', desc: 'Conversaciones iniciadas en WhatsApp Business (7 días)' },
   { key: 'lead',           label: 'Lead',            color: '#3b82f6', desc: 'Formularios de contacto completados' },
@@ -97,9 +84,23 @@ const LEGEND_ITEMS = [
   { key: 'sin_resultado',  label: 'Sin resultado',   color: '#6b7280', desc: 'Publicaciones impulsadas (objetivo: alcance/interacción)' },
 ];
 
+// ─── Sort types ────────────────────────────────────────────────────────────────
+type SortKey = 'name' | 'impressions' | 'clicks' | 'ctr' | 'results' | 'cost_per_result' | 'cpm' | 'reach' | 'spent';
+type SortDir = 'asc' | 'desc';
+
+function SortIcon({ active, dir }: { active: boolean; dir: SortDir }) {
+  return (
+    <span style={{ color: active ? '#1877F2' : 'var(--muted)', opacity: active ? 1 : 0.4, fontSize: 10 }}>
+      {active ? (dir === 'asc' ? ' ▲' : ' ▼') : ' ⇅'}
+    </span>
+  );
+}
+
 export default function CampaignsTable({ data, loading }: Props) {
-  const [filter, setFilter] = useState<string>('all');
+  const [filter, setFilter]       = useState<string>('all');
   const [showLegend, setShowLegend] = useState(false);
+  const [sortKey, setSortKey]     = useState<SortKey>('spent');
+  const [sortDir, setSortDir]     = useState<SortDir>('desc');
 
   if (loading) {
     return (
@@ -110,21 +111,41 @@ export default function CampaignsTable({ data, loading }: Props) {
     );
   }
 
-  // Build available filter keys from data
   const filterCounts: Record<string, number> = { all: data.length };
   for (const row of data) {
     const key = getFilterKey(row.result_type);
     filterCounts[key] = (filterCounts[key] || 0) + 1;
   }
-
   const filterKeys = ['all', ...Object.keys(filterCounts).filter((k) => k !== 'all')];
 
-  // Filter data
-  const filtered = filter === 'all'
-    ? [...data].sort((a, b) => b.spent - a.spent)
-    : [...data]
-        .filter((row) => getFilterKey(row.result_type) === filter)
-        .sort((a, b) => b.spent - a.spent);
+  function handleSort(key: SortKey) {
+    if (sortKey === key) {
+      setSortDir((d) => d === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortKey(key);
+      setSortDir('desc');
+    }
+  }
+
+  const filtered = (filter === 'all' ? [...data] : data.filter((r) => getFilterKey(r.result_type) === filter))
+    .sort((a, b) => {
+      const aVal = sortKey === 'name' ? a.name : (a[sortKey] as number);
+      const bVal = sortKey === 'name' ? b.name : (b[sortKey] as number);
+      if (typeof aVal === 'string') return sortDir === 'asc' ? aVal.localeCompare(bVal as string) : (bVal as string).localeCompare(aVal);
+      return sortDir === 'asc' ? (aVal as number) - (bVal as number) : (bVal as number) - (aVal as number);
+    });
+
+  function th(label: string, key: SortKey, align: 'left' | 'right' = 'right') {
+    return (
+      <th
+        className={align === 'right' ? 'text-right' : ''}
+        style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }}
+        onClick={() => handleSort(key)}
+      >
+        {label}<SortIcon active={sortKey === key} dir={sortDir} />
+      </th>
+    );
+  }
 
   return (
     <div className="card overflow-hidden">
@@ -153,21 +174,12 @@ export default function CampaignsTable({ data, loading }: Props) {
           </button>
         </div>
 
-        {/* ── Legend ── */}
         {showLegend && (
-          <div
-            className="mt-3 rounded-lg p-3 text-xs grid gap-1.5"
-            style={{ background: 'var(--surface2)', border: '1px solid var(--border)' }}
-          >
-            <p className="font-semibold mb-1" style={{ color: 'var(--text)' }}>
-              Tipos de resultado (conversiones)
-            </p>
+          <div className="mt-3 rounded-lg p-3 text-xs grid gap-1.5" style={{ background: 'var(--surface2)', border: '1px solid var(--border)' }}>
+            <p className="font-semibold mb-1" style={{ color: 'var(--text)' }}>Tipos de resultado (conversiones)</p>
             {LEGEND_ITEMS.map((item) => (
               <div key={item.key} className="flex items-start gap-2">
-                <span
-                  className="mt-0.5 shrink-0 inline-block w-2 h-2 rounded-full"
-                  style={{ background: item.color }}
-                />
+                <span className="mt-0.5 shrink-0 inline-block w-2 h-2 rounded-full" style={{ background: item.color }} />
                 <span>
                   <span className="font-medium" style={{ color: 'var(--text)' }}>{item.label}:</span>{' '}
                   <span style={{ color: 'var(--muted)' }}>{item.desc}</span>
@@ -177,12 +189,10 @@ export default function CampaignsTable({ data, loading }: Props) {
           </div>
         )}
 
-        {/* ── Filter chips ── */}
         <div className="flex flex-wrap gap-2 mt-3">
           {filterKeys.map((key) => {
             const isActive = filter === key;
             const count = filterCounts[key] || 0;
-            const label = FILTER_LABELS[key] || key;
             return (
               <button
                 key={key}
@@ -194,14 +204,11 @@ export default function CampaignsTable({ data, loading }: Props) {
                   border: 'none', cursor: 'pointer',
                 }}
               >
-                {label}
-                <span
-                  className="text-xs px-1 rounded"
-                  style={{
-                    background: isActive ? 'rgba(255,255,255,0.2)' : 'var(--border)',
-                    color: isActive ? '#fff' : 'var(--muted)',
-                  }}
-                >
+                {FILTER_LABELS[key] || key}
+                <span className="text-xs px-1 rounded" style={{
+                  background: isActive ? 'rgba(255,255,255,0.2)' : 'var(--border)',
+                  color: isActive ? '#fff' : 'var(--muted)',
+                }}>
                   {count}
                 </span>
               </button>
@@ -215,12 +222,18 @@ export default function CampaignsTable({ data, loading }: Props) {
         <table className="data-table">
           <thead>
             <tr>
-              <th>Campaña</th><th>Plataforma</th><th>Estado</th>
-              <th className="text-right">Impresiones</th><th className="text-right">Clics</th>
-              <th className="text-right">CTR</th><th className="text-right">Resultados</th>
-              <th className="text-right">Tipo resultado</th><th className="text-right">CPR</th>
-              <th className="text-right">CPM</th><th className="text-right">Alcance</th>
-              <th className="text-right">Invertido (COP)</th>
+              {th('Campaña', 'name', 'left')}
+              <th>Plataforma</th>
+              <th>Estado</th>
+              {th('Impresiones', 'impressions')}
+              {th('Clics', 'clicks')}
+              {th('CTR', 'ctr')}
+              {th('Resultados', 'results')}
+              <th className="text-right">Tipo resultado</th>
+              {th('CPR', 'cost_per_result')}
+              {th('CPM', 'cpm')}
+              {th('Alcance', 'reach')}
+              {th('Invertido (COP)', 'spent')}
             </tr>
           </thead>
           <tbody>
@@ -254,10 +267,8 @@ export default function CampaignsTable({ data, loading }: Props) {
                     {fmt(row.results)}
                   </td>
                   <td className="text-right">
-                    <span
-                      className="text-xs font-semibold px-2 py-0.5 rounded-full whitespace-nowrap"
-                      style={{ background: badge.bg, color: badge.color }}
-                    >
+                    <span className="text-xs font-semibold px-2 py-0.5 rounded-full whitespace-nowrap"
+                      style={{ background: badge.bg, color: badge.color }}>
                       {badge.label}
                     </span>
                   </td>

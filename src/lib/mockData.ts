@@ -8,6 +8,8 @@ import type {
   AdTableRow,
   NetworkBreakdownItem,
   KpiSummary,
+  EngagementTableRow,
+  FollowerTableRow,
 } from '@/types';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -44,15 +46,18 @@ function generateDailyData(days: number): DailyChartPoint[] {
     impressions = Math.max(10000, impressions + rnd(-1500, 2200));
     reach       = Math.max(7000, reach + rnd(-1000, 1500));
 
+    const r = Math.round(results);
+    const s = Math.round(spent);
     points.push({
       date:        formatDay(date),
       clicks:      Math.round(clicks),
-      results:     Math.round(results),
-      conversions: Math.round(results),
-      spent:       Math.round(spent),
+      results:     r,
+      conversions: r,
+      spent:       s,
       likes:       Math.round(likes),
       impressions: Math.round(impressions),
       reach:       Math.round(reach),
+      cpl:         r > 0 ? Math.round(s / r) : 0,
     });
   }
   return points;
@@ -158,6 +163,38 @@ const TABLE_ADS: AdTableRow[] = [
     ctr: 4.29, cpm: 9100, cpc: 2120, cost_per_result: 15900, spent: 1020000, reach: 8600 },
 ];
 
+// ─── Engagement table ─────────────────────────────────────────────────────────
+const TABLE_ENGAGEMENT: EngagementTableRow[] = [
+  { id: 'c_001', name: 'LI — Whatsapp Colombia', platform: 'meta',
+    result_type: 'onsite_conversion.messaging_conversation_started_7d',
+    likes: 1840, comments: 312, shares: 156, video_views: 24800,
+    reach: 38600, impressions: 48200, spent: 3200000 },
+  { id: 'c_002', name: 'Video — Concientización Deudas', platform: 'meta',
+    result_type: 'video_view',
+    likes: 4120, comments: 890, shares: 540, video_views: 82400,
+    reach: 94000, impressions: 118000, spent: 1850000 },
+  { id: 'c_003', name: 'Interacción — Post Asesoría', platform: 'meta',
+    result_type: 'post_engagement',
+    likes: 2760, comments: 480, shares: 230, video_views: 12100,
+    reach: 41000, impressions: 52000, spent: 720000 },
+  { id: 'c_004', name: 'Google Search — Deudas', platform: 'google',
+    result_type: 'google_search',
+    likes: 0, comments: 0, shares: 0, video_views: 0,
+    reach: 0, impressions: 28400, spent: 980000 },
+];
+
+// ─── Follower table ───────────────────────────────────────────────────────────
+const TABLE_FOLLOWERS: FollowerTableRow[] = [
+  { id: 'c_005', name: 'Seguidores — Página Semafora', platform: 'meta',
+    result_type: 'like',
+    followers_gained: 842, reach: 62000, impressions: 78000,
+    spent: 640000, cost_per_follower: 760 },
+  { id: 'c_006', name: 'Seguidores — Instagram Semafora', platform: 'meta',
+    result_type: 'follow',
+    followers_gained: 1240, reach: 84000, impressions: 101000,
+    spent: 920000, cost_per_follower: 742 },
+];
+
 // ─── Network breakdown ────────────────────────────────────────────────────────
 const NETWORK_BREAKDOWN: NetworkBreakdownItem[] = [
   { network: 'facebook', label: 'Facebook', impressions: 69000, clicks: 3200, results: 530,
@@ -185,6 +222,8 @@ export function getMockDashboardData(range: '7d' | '30d' | '90d'): DashboardData
     adSetsTable:      TABLE_ADSETS,
     adsTable:         TABLE_ADS,
     networkBreakdown: NETWORK_BREAKDOWN,
+    engagementTable:  TABLE_ENGAGEMENT,
+    followerTable:    TABLE_FOLLOWERS,
     lastSync:         new Date(Date.now() - 1000 * 60 * 23).toISOString(),
     isMockData:       true,
   };

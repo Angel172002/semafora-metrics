@@ -9,8 +9,8 @@ import { createTable, addColumn, insertRow } from '@/lib/nocodb';
 import fs from 'fs';
 import path from 'path';
 
-const NOCODB_PROJECT = process.env.NOCODB_PROJECT_ID || 'p0txioylznnyf39';
-const CAMPAIGN_TABLE_ID = process.env.NOCODB_TABLE_METRICS || 'mgp8sapw27x0zqv';
+const NOCODB_PROJECT = process.env.NOCODB_PROJECT_ID || '';
+const CAMPAIGN_TABLE_ID = process.env.NOCODB_TABLE_METRICS || '';
 
 // ─── Shared metric columns (appear in all 3 tables) ───────────────────────────
 const METRIC_COLUMNS = [
@@ -153,6 +153,13 @@ function updateEnvLocal(updates: Record<string, string>): void {
 
 // ─── POST /api/setup ──────────────────────────────────────────────────────────
 export async function POST() {
+  if (!NOCODB_PROJECT) {
+    return NextResponse.json(
+      { success: false, error: 'NOCODB_PROJECT_ID no configurado en las variables de entorno.' },
+      { status: 503 }
+    );
+  }
+
   const results: Record<string, string> = {};
   const warnings: string[] = [];
   const errors: string[] = [];
@@ -311,14 +318,6 @@ export async function POST() {
 
 export async function GET() {
   return NextResponse.json({
-    message: 'Use POST /api/setup to initialize NocoDB tables (ADS + CRM)',
-    configured: {
-      NOCODB_TABLE_ADSETS:          process.env.NOCODB_TABLE_ADSETS          || 'NOT SET',
-      NOCODB_TABLE_ADS:             process.env.NOCODB_TABLE_ADS             || 'NOT SET',
-      NOCODB_TABLE_CRM_STAGES:      process.env.NOCODB_TABLE_CRM_STAGES      || 'NOT SET',
-      NOCODB_TABLE_CRM_USERS:       process.env.NOCODB_TABLE_CRM_USERS       || 'NOT SET',
-      NOCODB_TABLE_CRM_LEADS:       process.env.NOCODB_TABLE_CRM_LEADS       || 'NOT SET',
-      NOCODB_TABLE_CRM_ACTIVITIES:  process.env.NOCODB_TABLE_CRM_ACTIVITIES  || 'NOT SET',
-    },
+    message: 'Usa POST /api/setup para inicializar las tablas de NocoDB (ADS + CRM).',
   });
 }

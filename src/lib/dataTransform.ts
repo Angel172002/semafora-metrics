@@ -19,18 +19,18 @@ import type {
   KpiSummary,
   DateRange,
   CampaignStatus,
+  EngagementTableRow,
+  FollowerTableRow,
 } from '@/types';
 
 // ─── Result type categories ───────────────────────────────────────────────────
-/** ONLY these count as true conversions (WhatsApp + form leads) */
+/** ONLY these count as true conversions (WhatsApp + Meta Instant Form leads) */
 const LEAD_RESULT_TYPES = new Set([
   'onsite_conversion.messaging_conversation_started_7d',
   'onsite_conversion.messaging_conversation_started_30d',
   'onsite_conversion.messaging_conversation_started',
   'onsite_conversion.lead_grouped',
   'lead',
-  'complete_registration',
-  'onsite_conversion.subscribe',
 ]);
 
 const VIDEO_RESULT_TYPES = new Set([
@@ -92,6 +92,39 @@ const NETWORK_COLORS: Record<string, string> = {
   // Generic
   all:              '#6b7280',
 };
+
+// ─── Deduplication ────────────────────────────────────────────────────────────
+/** Remove duplicate rows for the same campaign+date, keeping the most recently inserted (highest Id).
+ *  Safety net: handles the case where the cron re-inserts data already in the DB. */
+function deduplicateCampaigns(metrics: DailyMetric[]): DailyMetric[] {
+  const best = new Map<string, DailyMetric>();
+  for (const m of metrics) {
+    const key = `${m.campaign_id}__${m.date}`;
+    const prev = best.get(key);
+    if (!prev || (m.id ?? 0) > (prev.id ?? 0)) best.set(key, m);
+  }
+  return Array.from(best.values());
+}
+
+function deduplicateAdSets(items: AdSetMetric[]): AdSetMetric[] {
+  const best = new Map<string, AdSetMetric>();
+  for (const m of items) {
+    const key = `${m.adset_id}__${m.date}__${m.network}`;
+    const prev = best.get(key);
+    if (!prev || (m.id ?? 0) > (prev.id ?? 0)) best.set(key, m);
+  }
+  return Array.from(best.values());
+}
+
+function deduplicateAds(items: AdMetric[]): AdMetric[] {
+  const best = new Map<string, AdMetric>();
+  for (const m of items) {
+    const key = `${m.ad_id}__${m.date}__${m.network}`;
+    const prev = best.get(key);
+    if (!prev || (m.id ?? 0) > (prev.id ?? 0)) best.set(key, m);
+  }
+  return Array.from(best.values());
+}
 
 // ─── Date helpers ─────────────────────────────────────────────────────────────
 function formatDay(dateStr: string): string {
@@ -194,14 +227,15 @@ function buildKpis(current: DailyMetric[], previous: DailyMetric[]): KpiSummary 
 
 // ─── Daily chart ──────────────────────────────────────────────────────────────
 function buildDailyChart(metrics: DailyMetric[]): DailyChartPoint[] {
-  const grouped: Record<string, DailyChartPoint> = {};
+  const grouped: Record<string, DailyChartPoint & { leadResults: number }> = {};
 
   for (const m of metrics) {
     if (!grouped[m.date]) {
       grouped[m.date] = {
         date: formatDay(m.date),
         clicks: 0, results: 0, conversions: 0,
-        spent: 0, likes: 0, impressions: 0, reach: 0,
+        spent: 0, likes: 0, impressions: 0, reach: 0, cpl: 0,
+        leadResults: 0,
       };
     }
     grouped[m.date].clicks      += m.clicks;
@@ -211,11 +245,21 @@ function buildDailyChart(metrics: DailyMetric[]): DailyChartPoint[] {
     grouped[m.date].likes       += m.likes;
     grouped[m.date].impressions += m.impressions;
     grouped[m.date].reach       += m.reach;
+    if (LEAD_RESULT_TYPES.has(m.result_type)) {
+      grouped[m.date].leadResults += m.results;
+    }
   }
 
   return Object.entries(grouped)
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([, v]) => ({ ...v, spent: parseFloat(v.spent.toFixed(2)) }));
+    .map(([, v]) => {
+      const { leadResults, ...rest } = v;
+      return {
+        ...rest,
+        spent: parseFloat(v.spent.toFixed(2)),
+        cpl: leadResults > 0 ? Math.round(v.spent / leadResults) : 0,
+      };
+    });
 }
 
 // ─── Campaign chart ───────────────────────────────────────────────────────────
@@ -443,6 +487,72 @@ function buildNetworkBreakdown(adSets: AdSetMetric[]): NetworkBreakdownItem[] {
     }));
 }
 
+// ─── Engagement table (all campaigns, sorted by total engagement) ─────────────
+function buildEngagementTable(metrics: DailyMetric[]): EngagementTableRow[] {
+  const grouped = new Map<string, EngagementTableRow>();
+
+  for (const m of metrics) {
+    if (!grouped.has(m.campaign_id)) {
+      grouped.set(m.campaign_id, {
+        id: m.campaign_id,
+        name: m.campaign_name,
+        platform: m.platform,
+        result_type: m.result_type,
+        likes: 0, comments: 0, shares: 0, video_views: 0,
+        reach: 0, impressions: 0, spent: 0,
+      });
+    }
+    const row = grouped.get(m.campaign_id)!;
+    row.likes       += m.likes;
+    row.comments    += m.comments;
+    row.shares      += m.shares;
+    row.video_views += m.video_plays;
+    row.reach       += m.reach;
+    row.impressions += m.impressions;
+    row.spent       += m.spent;
+  }
+
+  return Array.from(grouped.values())
+    .map((r) => ({ ...r, spent: parseFloat(r.spent.toFixed(2)) }))
+    .sort((a, b) =>
+      (b.likes + b.comments + b.video_views) - (a.likes + a.comments + a.video_views) ||
+      b.spent - a.spent
+    );
+}
+
+// ─── Follower table (only follower-type campaigns) ─────────────────────────────
+function buildFollowerTable(metrics: DailyMetric[]): FollowerTableRow[] {
+  const grouped = new Map<string, FollowerTableRow>();
+
+  for (const m of metrics) {
+    if (!FOLLOWER_RESULT_TYPES.has(m.result_type)) continue;
+    if (!grouped.has(m.campaign_id)) {
+      grouped.set(m.campaign_id, {
+        id: m.campaign_id,
+        name: m.campaign_name,
+        platform: m.platform,
+        result_type: m.result_type,
+        followers_gained: 0, reach: 0, impressions: 0,
+        spent: 0, cost_per_follower: 0,
+      });
+    }
+    const row = grouped.get(m.campaign_id)!;
+    row.followers_gained += m.results;
+    row.reach            += m.reach;
+    row.impressions      += m.impressions;
+    row.spent            += m.spent;
+  }
+
+  return Array.from(grouped.values())
+    .map((r) => ({
+      ...r,
+      spent:             parseFloat(r.spent.toFixed(2)),
+      cost_per_follower: r.followers_gained > 0
+        ? parseFloat((r.spent / r.followers_gained).toFixed(2)) : 0,
+    }))
+    .sort((a, b) => b.followers_gained - a.followers_gained);
+}
+
 // ─── Main transform ───────────────────────────────────────────────────────────
 export function transformToDashboard(
   allCampaigns: DailyMetric[],
@@ -451,10 +561,15 @@ export function transformToDashboard(
   range: DateRange,
   lastSync: string | null
 ): DashboardData {
-  const current  = filterByRange(allCampaigns, range);
-  const previous = getPreviousPeriod(allCampaigns, range);
-  const curAdSets = filterByRange(allAdSets, range);
-  const curAds    = filterByRange(allAds, range);
+  // Deduplicate first (safety net against duplicate rows from incremental syncs)
+  const dedupedCampaigns = deduplicateCampaigns(allCampaigns);
+  const dedupedAdSets    = deduplicateAdSets(allAdSets);
+  const dedupedAds       = deduplicateAds(allAds);
+
+  const current  = filterByRange(dedupedCampaigns, range);
+  const previous = getPreviousPeriod(dedupedCampaigns, range);
+  const curAdSets = filterByRange(dedupedAdSets, range);
+  const curAds    = filterByRange(dedupedAds, range);
 
   return {
     kpis:             buildKpis(current, previous),
@@ -465,6 +580,8 @@ export function transformToDashboard(
     adSetsTable:      buildAdSetsTable(curAdSets),
     adsTable:         buildAdsTable(curAds),
     networkBreakdown: buildNetworkBreakdown(curAdSets),
+    engagementTable:  buildEngagementTable(current),
+    followerTable:    buildFollowerTable(current),
     lastSync,
     isMockData: false,
   };
