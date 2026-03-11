@@ -9,7 +9,7 @@ export async function register() {
     // Dynamic import to avoid loading node-cron in Edge runtime
     const cron = await import('node-cron');
 
-    const intervalHours = parseInt(process.env.SYNC_INTERVAL_HOURS || '6');
+    const intervalHours = parseInt(process.env.SYNC_INTERVAL_HOURS || '2');
     const cronExpression = `0 */${intervalHours} * * *`; // Every N hours
 
     console.log(`[semafora-metrics] Cron scheduler started — every ${intervalHours}h (${cronExpression})`);

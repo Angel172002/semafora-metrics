@@ -23,11 +23,8 @@ function todayStr() {
   return new Date().toISOString().split('T')[0];
 }
 
-function twoYearsAgo() {
-  const d = new Date();
-  d.setFullYear(d.getFullYear() - 2);
-  return d.toISOString().split('T')[0];
-}
+// Default: when Meta campaigns started
+const HIST_DEFAULT_SINCE = '2025-08-01';
 
 const DEFAULT_SETTINGS: AppSettings = {
   nocodbUrl: 'http://localhost:8080',
@@ -56,7 +53,7 @@ export default function SettingsModal({ open, onClose }: Props) {
   const [saved, setSaved] = useState(false);
 
   // Historical sync state
-  const [histSince, setHistSince]       = useState(twoYearsAgo);
+  const [histSince, setHistSince]       = useState(HIST_DEFAULT_SINCE);
   const [histStatus, setHistStatus]     = useState<HistSyncStatus>('idle');
   const [histProgress, setHistProgress] = useState({ done: 0, total: 0, current: '' });
   const [histErrors, setHistErrors]     = useState<string[]>([]);
@@ -206,7 +203,8 @@ export default function SettingsModal({ open, onClose }: Props) {
         {/* Historical sync */}
         <Section title="Historial completo" icon="📅">
           <p className="text-xs mb-3" style={{ color: 'var(--muted)' }}>
-            Trae todos los datos históricos de Meta Ads mes a mes para no exceder el tiempo límite de Vercel.
+            Trae todo el historial de Meta Ads mes a mes. El sync regular automático corre cada 2 horas
+            y cubre los últimos 30 días. Usa esto solo una vez para cargar el historial completo.
           </p>
           <div className="flex flex-col gap-2">
             <div className="flex items-center gap-3">
