@@ -2,14 +2,16 @@
 
 import { useState } from 'react';
 import {
-  ComposedChart,
-  Line,
+  AreaChart,
+  Area,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
   Legend,
   ResponsiveContainer,
+  LineChart,
+  Line,
 } from 'recharts';
 import type { DailyChartPoint } from '@/types';
 
@@ -24,12 +26,12 @@ function CustomTooltip({ active, payload, label }: any) {
   if (!active || !payload?.length) return null;
   return (
     <div className="custom-tooltip">
-      <p className="font-semibold mb-2" style={{ color: 'var(--text)' }}>{label}</p>
+      <p className="font-bold mb-2" style={{ color: 'var(--text)', fontSize: 12 }}>{label}</p>
       {payload.map((entry: any) => (
         <div key={entry.dataKey} className="flex items-center gap-2 text-xs mb-1">
           <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: entry.color }} />
           <span style={{ color: 'var(--muted)' }}>{entry.name}:</span>
-          <span className="font-semibold" style={{ color: entry.color }}>
+          <span className="font-bold" style={{ color: entry.color }}>
             {entry.dataKey === 'cpl' || entry.dataKey === 'spent'
               ? `$${entry.value.toLocaleString('es-CO')}`
               : entry.value.toLocaleString('es-CO')}
@@ -46,39 +48,47 @@ export default function DailyPerformanceChart({ data, loading }: Props) {
   if (loading) {
     return (
       <div className="card p-5">
-        <div className="skeleton h-5 w-40 mb-4" />
-        <div className="skeleton h-52 w-full" />
+        <div className="flex items-center justify-between mb-4">
+          <div className="skeleton h-4 w-40" />
+          <div className="skeleton h-7 w-28 rounded-lg" />
+        </div>
+        <div className="skeleton h-52 w-full rounded-xl" />
       </div>
     );
   }
 
-  // CPL view: only show days where leads were generated
   const cplData = data.filter((d) => d.cpl > 0);
 
   return (
     <div className="card p-5">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="font-semibold text-sm" style={{ color: 'var(--text)' }}>
-          Rendimiento Diario
-        </h3>
+      <div className="flex items-center justify-between mb-5">
+        <div>
+          <h3 className="chart-card-title">Rendimiento Diario</h3>
+          <p className="chart-card-subtitle">
+            {mode === 'performance' ? 'Evolución de clics y resultados' : 'Costo por Lead diario'}
+          </p>
+        </div>
         <div
-          className="flex rounded-lg overflow-hidden text-xs"
-          style={{ border: '1px solid var(--border)' }}
+          className="flex rounded-xl overflow-hidden"
+          style={{ border: '1px solid var(--border)', background: 'var(--surface2)' }}
         >
           {(['performance', 'cpl'] as ChartMode[]).map((m) => (
             <button
               key={m}
               onClick={() => setMode(m)}
-              className="px-3 py-1 transition-colors"
               style={{
-                background: mode === m ? '#1877F2' : 'var(--surface)',
-                color: mode === m ? '#fff' : 'var(--muted)',
+                padding: '5px 12px',
+                fontSize: 11,
+                fontWeight: m === mode ? 700 : 500,
+                background: m === mode ? 'var(--accent)' : 'transparent',
+                color: m === mode ? '#fff' : 'var(--muted)',
                 border: 'none',
                 cursor: 'pointer',
-                fontWeight: mode === m ? 600 : 400,
+                transition: 'all 0.15s',
+                borderRadius: 10,
               }}
             >
-              {m === 'performance' ? 'Clics/Leads' : 'CPL'}
+              {m === 'performance' ? 'Clics / Leads' : 'CPL'}
             </button>
           ))}
         </div>
@@ -86,59 +96,44 @@ export default function DailyPerformanceChart({ data, loading }: Props) {
 
       <ResponsiveContainer width="100%" height={220}>
         {mode === 'performance' ? (
-          <ComposedChart data={data} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
+          <AreaChart data={data} margin={{ top: 4, right: 4, left: -24, bottom: 0 }}>
+            <defs>
+              <linearGradient id="gradClicks" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%"  stopColor="#3b82f6" stopOpacity={0.3} />
+                <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+              </linearGradient>
+              <linearGradient id="gradResults" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%"  stopColor="#22c55e" stopOpacity={0.3} />
+                <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
+              </linearGradient>
+            </defs>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-            <XAxis
-              dataKey="date"
-              tick={{ fill: 'var(--muted)', fontSize: 11 }}
-              axisLine={false}
-              tickLine={false}
-              interval="preserveStartEnd"
-            />
-            <YAxis
-              tick={{ fill: 'var(--muted)', fontSize: 11 }}
-              axisLine={false}
-              tickLine={false}
-              tickFormatter={(v) => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v}
-            />
+            <XAxis dataKey="date" tick={{ fill: 'var(--muted)', fontSize: 10 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+            <YAxis tick={{ fill: 'var(--muted)', fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={(v) => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v} />
             <Tooltip content={<CustomTooltip />} cursor={{ stroke: 'var(--border2)', strokeWidth: 1 }} />
-            <Legend
-              wrapperStyle={{ paddingTop: 12, fontSize: 12 }}
-              formatter={(value) => <span style={{ color: 'var(--muted)' }}>{value}</span>}
-            />
-            <Line type="monotone" dataKey="clicks" name="Clicks" stroke="#3b82f6" strokeWidth={2}
-              dot={{ fill: '#3b82f6', r: 3, strokeWidth: 0 }} activeDot={{ r: 5, strokeWidth: 0 }} />
-            <Line type="monotone" dataKey="results" name="Resultados" stroke="#22c55e" strokeWidth={2}
-              dot={{ fill: '#22c55e', r: 3, strokeWidth: 0 }} activeDot={{ r: 5, strokeWidth: 0 }} />
-          </ComposedChart>
+            <Legend wrapperStyle={{ paddingTop: 12, fontSize: 11 }} formatter={(v) => <span style={{ color: 'var(--muted)' }}>{v}</span>} />
+            <Area type="monotone" dataKey="clicks"  name="Clics"      stroke="#3b82f6" strokeWidth={2} fill="url(#gradClicks)"  dot={false} activeDot={{ r: 4, strokeWidth: 0, fill: '#3b82f6' }} />
+            <Area type="monotone" dataKey="results" name="Resultados" stroke="#22c55e" strokeWidth={2} fill="url(#gradResults)" dot={false} activeDot={{ r: 4, strokeWidth: 0, fill: '#22c55e' }} />
+          </AreaChart>
         ) : (
-          <ComposedChart data={cplData} margin={{ top: 4, right: 8, left: -10, bottom: 0 }}>
+          <LineChart data={cplData} margin={{ top: 4, right: 4, left: -14, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-            <XAxis
-              dataKey="date"
-              tick={{ fill: 'var(--muted)', fontSize: 11 }}
-              axisLine={false}
-              tickLine={false}
-              interval="preserveStartEnd"
-            />
-            <YAxis
-              tick={{ fill: 'var(--muted)', fontSize: 11 }}
-              axisLine={false}
-              tickLine={false}
-              tickFormatter={(v) => v >= 1000 ? `$${(v / 1000).toFixed(0)}k` : `$${v}`}
-            />
+            <XAxis dataKey="date" tick={{ fill: 'var(--muted)', fontSize: 10 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+            <YAxis tick={{ fill: 'var(--muted)', fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v}`} />
             <Tooltip content={<CustomTooltip />} cursor={{ stroke: 'var(--border2)', strokeWidth: 1 }} />
-            <Legend
-              wrapperStyle={{ paddingTop: 12, fontSize: 12 }}
-              formatter={(value) => <span style={{ color: 'var(--muted)' }}>{value}</span>}
-            />
-            <Line type="monotone" dataKey="cpl" name="CPL (COP)" stroke="#f59e0b" strokeWidth={2.5}
-              strokeDasharray="5 3"
+            <Legend wrapperStyle={{ paddingTop: 12, fontSize: 11 }} formatter={(v) => <span style={{ color: 'var(--muted)' }}>{v}</span>} />
+            <Line
+              type="monotone"
+              dataKey="cpl"
+              name="CPL (COP)"
+              stroke="#f59e0b"
+              strokeWidth={2.5}
+              strokeDasharray="6 3"
               dot={{ fill: '#f59e0b', r: 4, strokeWidth: 0 }}
               activeDot={{ r: 6, strokeWidth: 0 }}
               connectNulls
             />
-          </ComposedChart>
+          </LineChart>
         )}
       </ResponsiveContainer>
     </div>

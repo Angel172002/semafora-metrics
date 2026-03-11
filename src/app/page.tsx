@@ -22,23 +22,21 @@ import { exportCSV } from '@/lib/export';
 function formatKpiValue(key: string, val: number): string {
   if (key === 'spent') return formatCOP(val, true);
   if (val >= 1_000_000) return `${(val / 1_000_000).toFixed(1)}M`;
-  if (val >= 1_000) return `${(val / 1_000).toFixed(1)}K`;
+  if (val >= 1_000)     return `${(val / 1_000).toFixed(1)}K`;
   return val.toLocaleString('es-CO');
 }
 
-// ─── Tab types ────────────────────────────────────────────────────────────────
 type DashTab = 'campanas' | 'conjuntos' | 'anuncios';
 
-// ─── Main Dashboard ───────────────────────────────────────────────────────────
 export default function DashboardPage() {
-  const [range, setRange] = useState<DateRange>('7d');
+  const [range, setRange]         = useState<DateRange>('7d');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<DashTab>('campanas');
   const { data, loading, syncing, triggerSync } = useMetrics(range);
   const { isDark, toggle } = useTheme();
 
   const tabs: { key: DashTab; label: string; count?: number }[] = [
-    { key: 'campanas',  label: 'Campañas',             count: data?.campaignsTable.length },
+    { key: 'campanas',  label: 'Campañas',              count: data?.campaignsTable.length },
     { key: 'conjuntos', label: 'Conjuntos de Anuncios', count: data?.adSetsTable.length },
     { key: 'anuncios',  label: 'Anuncios',              count: data?.adsTable.length },
   ];
@@ -58,28 +56,28 @@ export default function DashboardPage() {
         onToggleTheme={toggle}
       />
 
-      <main className="flex-1 p-4 md:p-6 flex flex-col gap-5 max-w-screen-2xl mx-auto w-full">
+      <main className="flex-1 p-4 md:p-6 flex flex-col gap-6 max-w-screen-2xl mx-auto w-full">
 
-        {/* ── KPI Row — Conversiones (SOLO WA/leads) ── */}
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-widest text-[var(--text-muted)] mb-2 px-0.5">
-            Conversiones reales
-          </p>
+        {/* ══ SECCIÓN 1: KPIs de conversión ══ */}
+        <section className="flex flex-col gap-3">
+          <p className="section-title">Conversiones reales</p>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             <KpiCard
               title="Leads / WhatsApp"
               value={formatKpiValue('results', data?.kpis.total_leads ?? 0)}
               change={data?.kpis.leads_change ?? 0}
               icon={<LeadIcon />}
-              iconBg="rgba(34,197,94,0.12)"
+              iconBg="rgba(34,197,94,0.14)"
+              iconColor="#4ade80"
               loading={loading}
             />
             <KpiCard
-              title="Invertido (COP)"
+              title="Invertido"
               value={formatKpiValue('spent', data?.kpis.total_spent ?? 0)}
               change={data?.kpis.spent_change ?? 0}
               icon={<BudgetIcon />}
-              iconBg="rgba(168,85,247,0.12)"
+              iconBg="rgba(168,85,247,0.14)"
+              iconColor="#c084fc"
               loading={loading}
             />
             <KpiCard
@@ -87,32 +85,34 @@ export default function DashboardPage() {
               value={formatKpiValue('spent', data?.kpis.total_costo_por_lead ?? 0)}
               change={-(data?.kpis.leads_change ?? 0)}
               icon={<CostIcon />}
-              iconBg="rgba(6,182,212,0.12)"
+              iconBg="rgba(20,184,166,0.14)"
+              iconColor="#2dd4bf"
+              subtitle="Menor es mejor"
               loading={loading}
             />
             <KpiCard
-              title="Alcance"
+              title="Alcance Total"
               value={formatKpiValue('reach', data?.kpis.total_reach ?? 0)}
               change={data?.kpis.reach_change ?? 0}
               icon={<ReachIcon />}
-              iconBg="rgba(139,92,246,0.12)"
+              iconBg="rgba(99,102,241,0.14)"
+              iconColor="#a5b4fc"
               loading={loading}
             />
           </div>
-        </div>
+        </section>
 
-        {/* ── KPI Row — Otras métricas ── */}
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-widest text-[var(--text-muted)] mb-2 px-0.5">
-            Otras métricas de campaña
-          </p>
+        {/* ══ SECCIÓN 2: Otras métricas ══ */}
+        <section className="flex flex-col gap-3">
+          <p className="section-title">Métricas de alcance e interacción</p>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             <KpiCard
               title="Vistas de Video"
               value={formatKpiValue('results', data?.kpis.total_video_views ?? 0)}
               change={data?.kpis.video_views_change ?? 0}
               icon={<VideoIcon />}
-              iconBg="rgba(245,158,11,0.12)"
+              iconBg="rgba(245,158,11,0.14)"
+              iconColor="#fbbf24"
               loading={loading}
             />
             <KpiCard
@@ -120,7 +120,8 @@ export default function DashboardPage() {
               value={formatKpiValue('results', data?.kpis.total_followers ?? 0)}
               change={data?.kpis.followers_change ?? 0}
               icon={<FollowerIcon />}
-              iconBg="rgba(236,72,153,0.12)"
+              iconBg="rgba(236,72,153,0.14)"
+              iconColor="#f472b6"
               loading={loading}
             />
             <KpiCard
@@ -128,84 +129,83 @@ export default function DashboardPage() {
               value={formatKpiValue('imp', data?.kpis.total_impressions ?? 0)}
               change={data?.kpis.impressions_change ?? 0}
               icon={<ImpressionsIcon />}
-              iconBg="rgba(59,130,246,0.12)"
+              iconBg="rgba(59,130,246,0.14)"
+              iconColor="#60a5fa"
               loading={loading}
             />
             <KpiCard
-              title="Clics"
+              title="Clics Totales"
               value={formatKpiValue('clicks', data?.kpis.total_clicks ?? 0)}
               change={data?.kpis.clicks_change ?? 0}
               icon={<ImpressionsIcon />}
-              iconBg="rgba(59,130,246,0.08)"
+              iconBg="rgba(59,130,246,0.09)"
+              iconColor="#93c5fd"
               loading={loading}
             />
           </div>
-        </div>
+        </section>
 
-        {/* ── Charts row ── */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-          <DailyPerformanceChart data={data?.dailyChart ?? []} loading={loading} />
-          <BudgetChart data={data?.dailyChart ?? []} loading={loading} />
-        </div>
+        {/* ══ SECCIÓN 3: Gráficas de rendimiento ══ */}
+        <section className="flex flex-col gap-3">
+          <p className="section-title">Rendimiento temporal</p>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <DailyPerformanceChart data={data?.dailyChart ?? []} loading={loading} />
+            <BudgetChart data={data?.dailyChart ?? []} loading={loading} />
+          </div>
+        </section>
 
-        {/* ── Campaign chart + Network Breakdown ── */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-          <CampaignComparisonChart data={data?.campaignChart ?? []} loading={loading} />
-          <NetworkBreakdownChart data={data?.networkBreakdown ?? []} loading={loading} />
-        </div>
+        {/* ══ SECCIÓN 4: Comparativas y breakdown ══ */}
+        <section className="flex flex-col gap-3">
+          <p className="section-title">Comparativa por campaña y canal</p>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <CampaignComparisonChart data={data?.campaignChart ?? []} loading={loading} />
+            <NetworkBreakdownChart data={data?.networkBreakdown ?? []} loading={loading} />
+          </div>
+        </section>
 
-        {/* ── Budget distribution ── */}
+        {/* ══ SECCIÓN 5: Distribución presupuesto ══ */}
         <BudgetDistributionChart data={data?.platformBudget ?? []} loading={loading} />
 
-        {/* ── 3-Level Tabs ── */}
-        <div className="card overflow-hidden">
-          {/* Tab header */}
-          <div
-            className="flex border-b overflow-x-auto"
-            style={{ borderColor: 'var(--border)', background: 'var(--surface)' }}
-          >
-            {tabs.map((tab) => (
-              <button
-                key={tab.key}
-                onClick={() => setActiveTab(tab.key)}
-                className="flex items-center gap-2 px-5 py-3.5 text-sm font-medium whitespace-nowrap transition-colors"
-                style={{
-                  color: activeTab === tab.key ? 'var(--text)' : 'var(--muted)',
-                  borderBottom: activeTab === tab.key ? '2px solid #1877F2' : '2px solid transparent',
-                  background: 'transparent',
-                  cursor: 'pointer',
-                  outline: 'none',
-                  border: 'none',
-                  paddingBottom: activeTab === tab.key ? 'calc(0.875rem - 2px)' : '0.875rem',
-                }}
-              >
-                {tab.label}
-                {tab.count !== undefined && tab.count > 0 && (
-                  <span
-                    className="text-xs px-1.5 py-0.5 rounded-full font-semibold"
-                    style={{
-                      background: activeTab === tab.key ? 'rgba(24,119,242,0.15)' : 'var(--surface2)',
-                      color: activeTab === tab.key ? '#1877F2' : 'var(--muted)',
-                    }}
-                  >
-                    {tab.count}
-                  </span>
-                )}
-              </button>
-            ))}
-          </div>
+        {/* ══ SECCIÓN 6: Tablas detalladas ══ */}
+        <section className="flex flex-col gap-3">
+          <p className="section-title">Análisis detallado</p>
+          <div className="card overflow-hidden">
+            {/* Tab bar */}
+            <div className="tab-bar">
+              {tabs.map((tab) => (
+                <button
+                  key={tab.key}
+                  onClick={() => setActiveTab(tab.key)}
+                  className={`tab-item ${activeTab === tab.key ? 'active' : ''}`}
+                >
+                  {tab.label}
+                  {tab.count !== undefined && tab.count > 0 && (
+                    <span
+                      className="tab-count"
+                      style={{
+                        background: activeTab === tab.key ? 'rgba(99,102,241,0.18)' : 'var(--surface2)',
+                        color: activeTab === tab.key ? 'var(--accent)' : 'var(--muted)',
+                      }}
+                    >
+                      {tab.count}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
 
-          {/* Tab panels — all mounted, just hidden for perf */}
-          <div style={{ display: activeTab === 'campanas' ? 'block' : 'none' }}>
-            <CampaignsTable data={data?.campaignsTable ?? []} loading={loading} />
+            {/* Tab content */}
+            <div style={{ display: activeTab === 'campanas'  ? 'block' : 'none' }}>
+              <CampaignsTable data={data?.campaignsTable ?? []} loading={loading} />
+            </div>
+            <div style={{ display: activeTab === 'conjuntos' ? 'block' : 'none' }}>
+              <AdSetsTable data={data?.adSetsTable ?? []} loading={loading} />
+            </div>
+            <div style={{ display: activeTab === 'anuncios'  ? 'block' : 'none' }}>
+              <AdsTable data={data?.adsTable ?? []} loading={loading} />
+            </div>
           </div>
-          <div style={{ display: activeTab === 'conjuntos' ? 'block' : 'none' }}>
-            <AdSetsTable data={data?.adSetsTable ?? []} loading={loading} />
-          </div>
-          <div style={{ display: activeTab === 'anuncios' ? 'block' : 'none' }}>
-            <AdsTable data={data?.adsTable ?? []} loading={loading} />
-          </div>
-        </div>
+        </section>
 
       </main>
 
