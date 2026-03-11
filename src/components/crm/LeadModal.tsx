@@ -18,6 +18,22 @@ interface Props {
 
 const ORIGINS = ['Meta Ads', 'Google Ads', 'TikTok Ads', 'Orgánico', 'Referido', 'WhatsApp', 'Otro'] as const;
 
+const ACTIVITY_ICONS: Record<string, string> = {
+  Llamada: '📞', WhatsApp: '💬', Email: '📧', Reunión: '🤝', Nota: '📝',
+};
+
+function getInitials(name: string): string {
+  const p = name.trim().split(' ').filter(Boolean);
+  if (p.length === 0) return '?';
+  return p.length === 1 ? p[0].slice(0, 2).toUpperCase() : (p[0][0] + p[1][0]).toUpperCase();
+}
+function getAvatarColor(name: string): string {
+  const colors = ['#6366f1','#8b5cf6','#ec4899','#3b82f6','#14b8a6','#f59e0b','#10b981'];
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = name.charCodeAt(i) + ((h << 5) - h);
+  return colors[Math.abs(h) % colors.length];
+}
+
 export default function LeadModal({ isOpen, onClose, lead, stages, users, mode, defaultStageId, onSaved }: Props) {
   const [tab, setTab] = useState<'info' | 'activities' | 'notes'>('info');
   const [activities, setActivities] = useState<CrmActivity[]>([]);
@@ -26,7 +42,6 @@ export default function LeadModal({ isOpen, onClose, lead, stages, users, mode, 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  // Form state
   const [form, setForm] = useState({
     Nombre: '', Telefono: '', Email: '', Empresa: '',
     Origen: 'Meta Ads' as string,
@@ -37,7 +52,6 @@ export default function LeadModal({ isOpen, onClose, lead, stages, users, mode, 
     Motivo_Perdida: '',
   });
 
-  // Sync form with lead data
   useEffect(() => {
     if (lead) {
       setForm({
@@ -73,34 +87,28 @@ export default function LeadModal({ isOpen, onClose, lead, stages, users, mode, 
     finally { setLoadingActs(false); }
   }, [lead]);
 
-  useEffect(() => {
-    if (isOpen && tab === 'activities' && lead) fetchActivities();
-  }, [isOpen, tab, lead, fetchActivities]);
-
-  useEffect(() => {
-    if (!isOpen) { setTab('info'); setError(''); }
-  }, [isOpen]);
+  useEffect(() => { if (isOpen && tab === 'activities' && lead) fetchActivities(); }, [isOpen, tab, lead, fetchActivities]);
+  useEffect(() => { if (!isOpen) { setTab('info'); setError(''); } }, [isOpen]);
 
   const handleSave = async () => {
     if (!form.Nombre.trim()) { setError('El nombre es obligatorio'); return; }
     setSaving(true); setError('');
     try {
       const selectedStage = stages.find((s) => s.Id === Number(form.Stage_Id));
-      const selectedUser  = users.find((u) => u.Id === Number(form.Usuario_Id));
+      const selectedUser  = users.find((u)  => u.Id === Number(form.Usuario_Id));
       const payload = {
         ...form,
-        Valor_Estimado:    parseFloat(form.Valor_Estimado) || 0,
-        Stage_Id:          Number(form.Stage_Id),
-        Stage_Nombre:      selectedStage?.Nombre || '',
-        Stage_Color:       selectedStage?.Color  || '#3b82f6',
-        Usuario_Id:        Number(form.Usuario_Id),
-        Usuario_Nombre:    selectedUser?.Nombre  || 'Administrador',
+        Valor_Estimado: parseFloat(form.Valor_Estimado) || 0,
+        Stage_Id:       Number(form.Stage_Id),
+        Stage_Nombre:   selectedStage?.Nombre || '',
+        Stage_Color:    selectedStage?.Color  || '#6366f1',
+        Usuario_Id:     Number(form.Usuario_Id),
+        Usuario_Nombre: selectedUser?.Nombre  || 'Administrador',
       };
-
-      const url = lead ? `/api/crm/leads/${lead.Id}` : '/api/crm/leads';
+      const url    = lead ? `/api/crm/leads/${lead.Id}` : '/api/crm/leads';
       const method = lead ? 'PATCH' : 'POST';
-      const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-      const json = await res.json();
+      const res    = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      const json   = await res.json();
       if (!json.success) throw new Error(json.error || 'Error al guardar');
       onSaved(); onClose();
     } catch (e) {
@@ -132,9 +140,9 @@ export default function LeadModal({ isOpen, onClose, lead, stages, users, mode, 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           Estado: status,
-          Stage_Id: stage?.Id,
-          Stage_Nombre: stage?.Nombre || (status === 'ganado' ? 'Ganado' : 'Perdido'),
-          Stage_Color: stage?.Color || (status === 'ganado' ? '#10b981' : '#ef4444'),
+          Stage_Id:     stage?.Id,
+          Stage_Nombre: stage?.Nombre || (status === 'ganado' ? 'Ganado'  : 'Perdido'),
+          Stage_Color:  stage?.Color  || (status === 'ganado' ? '#10b981' : '#ef4444'),
           Fecha_Cierre: new Date().toISOString(),
         }),
       });
@@ -144,248 +152,259 @@ export default function LeadModal({ isOpen, onClose, lead, stages, users, mode, 
 
   if (!isOpen) return null;
 
+  const avatarName  = form.Nombre || 'Lead';
+  const avatarColor = getAvatarColor(avatarName);
+
   const field = (label: string, children: React.ReactNode, required = false) => (
     <div>
-      <label className="block text-xs font-medium text-[var(--muted)] mb-1">
-        {label}{required && <span className="text-[var(--primary)] ml-0.5">*</span>}
+      <label className="block text-xs font-semibold mb-1" style={{ color: 'var(--muted)' }}>
+        {label}{required && <span style={{ color: 'var(--primary)' }}> *</span>}
       </label>
       {children}
     </div>
   );
 
-  const input = (name: keyof typeof form, placeholder = '', type = 'text') => (
+  const inp = (name: keyof typeof form, placeholder = '', type = 'text') => (
     <input
       type={type}
       value={form[name]}
       onChange={(e) => setForm((f) => ({ ...f, [name]: e.target.value }))}
       placeholder={placeholder}
-      className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm text-[var(--text)] placeholder-[var(--muted)] focus:outline-none focus:border-[var(--primary)]/60"
+      className="input-field"
     />
+  );
+
+  const sel = (name: keyof typeof form, children: React.ReactNode) => (
+    <select
+      value={form[name]}
+      onChange={(e) => setForm((f) => ({ ...f, [name]: e.target.value }))}
+      className="input-field"
+      style={{ paddingRight: 32, appearance: 'none',
+        backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238888a0' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E\")",
+        backgroundRepeat: 'no-repeat', backgroundPosition: 'right 10px center' }}
+    >
+      {children}
+    </select>
   );
 
   return (
     <>
-      <div className="fixed inset-0 z-50 flex items-start justify-end">
-        {/* Backdrop */}
-        <div className="absolute inset-0 bg-black/60" onClick={onClose} />
+      {/* Backdrop */}
+      <div className="side-panel-overlay" onClick={onClose} />
 
-        {/* Side panel */}
-        <div className="relative z-10 w-full max-w-xl h-screen bg-[var(--surface)] border-l border-[var(--border)] flex flex-col overflow-hidden animate-slide-in">
+      {/* Panel */}
+      <div className="side-panel">
 
-          {/* Header */}
-          <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border)] flex-shrink-0">
-            <div>
-              <h2 className="text-base font-semibold text-[var(--text)]">
-                {mode === 'create' ? 'Nuevo Lead' : (form.Nombre || 'Lead')}
-              </h2>
-              {lead && (
-                <p className="text-xs text-[var(--muted)] mt-0.5">
-                  Creado {new Date(lead.Fecha_Creacion).toLocaleDateString('es-CO')}
-                  {lead.Valor_Estimado > 0 && ` · ${formatCOP(lead.Valor_Estimado, true)}`}
-                </p>
-              )}
-            </div>
-            <div className="flex items-center gap-2">
-              {lead && lead.Estado === 'abierto' && (
-                <>
-                  <button
-                    onClick={() => handleMarkStatus('ganado')}
-                    className="text-xs px-3 py-1.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 rounded-lg hover:bg-emerald-500/20 transition-colors"
-                  >✓ Ganado</button>
-                  <button
-                    onClick={() => handleMarkStatus('perdido')}
-                    className="text-xs px-3 py-1.5 bg-red-500/10 text-red-400 border border-red-500/30 rounded-lg hover:bg-red-500/20 transition-colors"
-                  >✗ Perdido</button>
-                </>
-              )}
-              <button onClick={onClose} className="text-[var(--muted)] hover:text-[var(--text)] transition-colors p-1">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M18 6L6 18M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
+        {/* Header */}
+        <div className="px-6 py-4 border-b flex items-start gap-3" style={{ borderColor: 'var(--border)' }}>
+          {/* Avatar */}
+          <div
+            className="w-11 h-11 rounded-full flex items-center justify-center flex-shrink-0 font-bold text-white text-sm"
+            style={{ background: `${avatarColor}cc` }}
+          >
+            {getInitials(avatarName)}
           </div>
 
-          {/* Tabs */}
-          <div className="flex border-b border-[var(--border)] px-6 flex-shrink-0">
-            {(['info', 'activities', 'notes'] as const).map((t) => (
-              <button
-                key={t}
-                onClick={() => setTab(t)}
-                className={`py-3 px-1 mr-6 text-sm font-medium border-b-2 transition-colors ${
-                  tab === t
-                    ? 'border-[var(--primary)] text-[var(--text)]'
-                    : 'border-transparent text-[var(--muted)] hover:text-[var(--text)]'
-                }`}
-              >
-                {t === 'info' ? 'Información' : t === 'activities' ? 'Actividades' : 'Notas'}
-              </button>
-            ))}
-          </div>
-
-          {/* Body */}
-          <div className="flex-1 overflow-y-auto px-6 py-4">
-
-            {/* ── INFO TAB ── */}
-            {tab === 'info' && (
-              <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-3">
-                  {field('Nombre', input('Nombre', 'Juan García'), true)}
-                  {field('Teléfono', input('Telefono', '+57 300 000 0000', 'tel'))}
-                  {field('Email', input('Email', 'juan@empresa.com', 'email'))}
-                  {field('Empresa', input('Empresa', 'Empresa S.A.S.'))}
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  {field('Origen', (
-                    <select
-                      value={form.Origen}
-                      onChange={(e) => setForm((f) => ({ ...f, Origen: e.target.value }))}
-                      className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm text-[var(--text)] focus:outline-none focus:border-[var(--primary)]/60"
-                    >
-                      {ORIGINS.map((o) => <option key={o} value={o}>{o}</option>)}
-                    </select>
-                  ))}
-                  {field('Campaña de origen', input('Nombre_Campana', 'Clientes Enero 2026'))}
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  {field('Etapa', (
-                    <select
-                      value={form.Stage_Id}
-                      onChange={(e) => {
-                        setForm((f) => ({ ...f, Stage_Id: e.target.value }));
-                        if (lead) handleChangeStage(Number(e.target.value));
-                      }}
-                      className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm text-[var(--text)] focus:outline-none focus:border-[var(--primary)]/60"
-                    >
-                      {stages.map((s) => <option key={s.Id} value={s.Id}>{s.Nombre}</option>)}
-                    </select>
-                  ))}
-                  {field('Asesor', (
-                    <select
-                      value={form.Usuario_Id}
-                      onChange={(e) => setForm((f) => ({ ...f, Usuario_Id: e.target.value }))}
-                      className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm text-[var(--text)] focus:outline-none focus:border-[var(--primary)]/60"
-                    >
-                      {users.map((u) => <option key={u.Id} value={u.Id}>{u.Nombre}</option>)}
-                    </select>
-                  ))}
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  {field('Valor Estimado (COP)', input('Valor_Estimado', '5000000', 'number'))}
-                  {field('Próxima acción', input('Proxima_Accion_Fecha', '', 'date'))}
-                </div>
-
-                {form.Estado !== 'abierto' && (
-                  <div className="grid grid-cols-2 gap-3">
-                    {field('Estado', (
-                      <div className={`px-3 py-2 rounded-lg text-sm font-medium ${
-                        form.Estado === 'ganado' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'
-                      }`}>
-                        {form.Estado === 'ganado' ? '✓ Ganado' : '✗ Perdido'}
-                      </div>
-                    ))}
-                    {form.Estado === 'perdido' && field('Motivo pérdida', (
-                      <input
-                        type="text"
-                        value={form.Motivo_Perdida}
-                        onChange={(e) => setForm((f) => ({ ...f, Motivo_Perdida: e.target.value }))}
-                        className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm text-[var(--text)] focus:outline-none"
-                      />
-                    ))}
-                  </div>
-                )}
-
-                {error && (
-                  <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2">{error}</p>
-                )}
-              </div>
+          <div className="flex-1 min-w-0">
+            <h2 className="text-base font-bold truncate" style={{ color: 'var(--text)' }}>
+              {mode === 'create' ? 'Nuevo Lead' : (form.Nombre || 'Lead')}
+            </h2>
+            {lead && (
+              <p className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>
+                Creado {new Date(lead.Fecha_Creacion).toLocaleDateString('es-CO')}
+                {lead.Valor_Estimado > 0 && <span style={{ color: '#4ade80' }}> · {formatCOP(lead.Valor_Estimado, true)}</span>}
+              </p>
             )}
+          </div>
 
-            {/* ── ACTIVITIES TAB ── */}
-            {tab === 'activities' && (
-              <div className="space-y-3">
-                <button
-                  onClick={() => setShowActivityModal(true)}
-                  className="w-full py-2.5 border border-dashed border-[var(--border)] rounded-xl text-sm text-[var(--muted)] hover:text-[var(--primary)] hover:border-[var(--primary)]/50 transition-colors"
-                >
-                  + Registrar actividad
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {lead && lead.Estado === 'abierto' && (
+              <>
+                <button onClick={() => handleMarkStatus('ganado')} className="btn btn-success" style={{ fontSize: 11, padding: '5px 10px' }}>
+                  ✓ Ganado
                 </button>
-                {loadingActs ? (
-                  <div className="space-y-2">
-                    {[1,2,3].map(i => <div key={i} className="h-16 bg-[var(--border)]/30 rounded-xl animate-pulse" />)}
-                  </div>
-                ) : activities.length === 0 ? (
-                  <div className="text-center py-10 text-[var(--muted)] text-sm">Sin actividades registradas</div>
-                ) : (
-                  activities.map((act) => (
-                    <div key={act.Id} className="bg-[var(--bg)] border border-[var(--border)] rounded-xl p-3">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex items-center gap-2">
-                          <span className="text-lg">{
-                            act.Tipo === 'Llamada' ? '📞'
-                            : act.Tipo === 'WhatsApp' ? '💬'
-                            : act.Tipo === 'Email' ? '📧'
-                            : act.Tipo === 'Reunión' ? '🤝'
-                            : '📝'
-                          }</span>
-                          <div>
-                            <p className="text-sm font-medium text-[var(--text)]">{act.Tipo}</p>
-                            <p className="text-xs text-[var(--muted)]">{act.Resultado}</p>
-                          </div>
-                        </div>
-                        <span className="text-xs text-[var(--muted)] whitespace-nowrap">
-                          {new Date(act.Fecha).toLocaleDateString('es-CO')}
-                        </span>
-                      </div>
-                      {act.Nota && <p className="mt-2 text-xs text-[var(--muted)] leading-relaxed">{act.Nota}</p>}
-                      {act.Proxima_Accion_Fecha && (
-                        <p className="mt-1.5 text-xs text-amber-400">
-                          📅 Próxima acción: {new Date(act.Proxima_Accion_Fecha).toLocaleDateString('es-CO')}
-                          {act.Proxima_Accion_Nota && ` — ${act.Proxima_Accion_Nota}`}
-                        </p>
-                      )}
-                    </div>
-                  ))
-                )}
-              </div>
+                <button onClick={() => handleMarkStatus('perdido')} className="btn btn-danger" style={{ fontSize: 11, padding: '5px 10px' }}>
+                  ✗ Perdido
+                </button>
+              </>
             )}
-
-            {/* ── NOTES TAB ── */}
-            {tab === 'notes' && (
-              <div>
-                <textarea
-                  value={form.Notas}
-                  onChange={(e) => setForm((f) => ({ ...f, Notas: e.target.value }))}
-                  rows={12}
-                  placeholder="Notas sobre este lead..."
-                  className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-xl px-4 py-3 text-sm text-[var(--text)] placeholder-[var(--muted)] focus:outline-none focus:border-[var(--primary)]/60 resize-none"
-                />
-              </div>
-            )}
+            <button onClick={onClose} className="btn btn-ghost btn-icon">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M18 6L6 18M6 6l12 12"/>
+              </svg>
+            </button>
           </div>
+        </div>
 
-          {/* Footer actions */}
-          {(tab === 'info' || tab === 'notes') && (
-            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-[var(--border)] flex-shrink-0">
-              <button onClick={onClose} className="px-4 py-2 text-sm text-[var(--muted)] hover:text-[var(--text)] transition-colors">
-                Cancelar
-              </button>
-              <button
-                onClick={handleSave}
-                disabled={saving}
-                className="px-5 py-2 bg-[var(--primary)] text-white text-sm font-medium rounded-lg hover:opacity-90 disabled:opacity-50 transition-opacity"
-              >
-                {saving ? 'Guardando...' : lead ? 'Guardar cambios' : 'Crear lead'}
-              </button>
+        {/* Tabs */}
+        <div className="tab-bar px-2">
+          {(['info', 'activities', 'notes'] as const).map((t) => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={`tab-item ${tab === t ? 'active' : ''}`}
+            >
+              {t === 'info' ? 'Información' : t === 'activities' ? 'Actividades' : 'Notas'}
+            </button>
+          ))}
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto px-6 py-5">
+
+          {/* ── INFO ── */}
+          {tab === 'info' && (
+            <div className="flex flex-col gap-4">
+              <div className="grid grid-cols-2 gap-3">
+                {field('Nombre', inp('Nombre', 'Juan García'), true)}
+                {field('Teléfono', inp('Telefono', '+57 300 000 0000', 'tel'))}
+                {field('Email', inp('Email', 'juan@empresa.com', 'email'))}
+                {field('Empresa', inp('Empresa', 'Empresa S.A.S.'))}
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                {field('Origen', sel('Origen', ORIGINS.map((o) => <option key={o} value={o}>{o}</option>)))}
+                {field('Campaña de origen', inp('Nombre_Campana', 'Clientes Enero 2026'))}
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                {field('Etapa', sel('Stage_Id',
+                  stages.map((s) => (
+                    <option key={s.Id} value={s.Id} onClick={() => lead && handleChangeStage(s.Id)}>
+                      {s.Nombre}
+                    </option>
+                  ))
+                ))}
+                {field('Asesor', sel('Usuario_Id',
+                  users.map((u) => <option key={u.Id} value={u.Id}>{u.Nombre}</option>)
+                ))}
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                {field('Valor Estimado (COP)', inp('Valor_Estimado', '5000000', 'number'))}
+                {field('Próxima acción', inp('Proxima_Accion_Fecha', '', 'date'))}
+              </div>
+
+              {form.Estado !== 'abierto' && (
+                <div className="grid grid-cols-2 gap-3">
+                  {field('Estado', (
+                    <div className={`px-3 py-2 rounded-lg text-sm font-semibold`}
+                      style={form.Estado === 'ganado'
+                        ? { background: 'rgba(74,222,128,0.1)', color: '#4ade80', border: '1px solid rgba(74,222,128,0.2)' }
+                        : { background: 'rgba(248,113,113,0.1)', color: '#f87171', border: '1px solid rgba(248,113,113,0.2)' }}>
+                      {form.Estado === 'ganado' ? '✓ Ganado' : '✗ Perdido'}
+                    </div>
+                  ))}
+                  {form.Estado === 'perdido' && field('Motivo pérdida', inp('Motivo_Perdida', 'Precio, timing...'))}
+                </div>
+              )}
+
+              {error && (
+                <div className="p-3 rounded-xl text-xs flex items-center gap-2"
+                  style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', color: '#f87171' }}>
+                  <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                    <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+                  </svg>
+                  {error}
+                </div>
+              )}
             </div>
           )}
+
+          {/* ── ACTIVITIES ── */}
+          {tab === 'activities' && (
+            <div className="flex flex-col gap-3">
+              <button
+                onClick={() => setShowActivityModal(true)}
+                className="w-full py-3 rounded-xl text-sm font-semibold transition-colors flex items-center justify-center gap-2"
+                style={{ border: '1.5px dashed var(--border2)', color: 'var(--muted)', background: 'transparent', cursor: 'pointer' }}
+                onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = 'var(--accent)'; (e.currentTarget as HTMLElement).style.borderColor = 'var(--accent)'; }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = 'var(--muted)'; (e.currentTarget as HTMLElement).style.borderColor = 'var(--border2)'; }}
+              >
+                <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                  <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+                </svg>
+                Registrar actividad
+              </button>
+
+              {loadingActs ? (
+                Array.from({ length: 3 }).map((_, i) => (
+                  <div key={i} className="skeleton h-16 rounded-xl" />
+                ))
+              ) : activities.length === 0 ? (
+                <div className="text-center py-10 text-sm" style={{ color: 'var(--muted)' }}>
+                  Sin actividades registradas
+                </div>
+              ) : (
+                activities.map((act) => (
+                  <div key={act.Id} className="card-flat rounded-xl p-3.5">
+                    <div className="flex items-start justify-between gap-2 mb-2">
+                      <div className="flex items-center gap-2.5">
+                        <span className="text-lg leading-none">{ACTIVITY_ICONS[act.Tipo] ?? '📝'}</span>
+                        <div>
+                          <p className="text-sm font-semibold" style={{ color: 'var(--text)' }}>{act.Tipo}</p>
+                          <p className="text-xs" style={{ color: 'var(--muted)' }}>{act.Resultado}</p>
+                        </div>
+                      </div>
+                      <span className="text-xs flex-shrink-0" style={{ color: 'var(--muted2)' }}>
+                        {new Date(act.Fecha).toLocaleDateString('es-CO', { day: '2-digit', month: 'short' })}
+                      </span>
+                    </div>
+                    {act.Nota && (
+                      <p className="text-xs leading-relaxed pl-9" style={{ color: 'var(--text-soft)' }}>{act.Nota}</p>
+                    )}
+                    {act.Proxima_Accion_Fecha && (
+                      <div className="flex items-center gap-1.5 mt-2 pl-9">
+                        <svg width="11" height="11" fill="none" viewBox="0 0 24 24" stroke="#fbbf24" strokeWidth="2">
+                          <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/>
+                        </svg>
+                        <p className="text-xs font-medium" style={{ color: '#fbbf24' }}>
+                          {new Date(act.Proxima_Accion_Fecha).toLocaleDateString('es-CO')}
+                          {act.Proxima_Accion_Nota && ` — ${act.Proxima_Accion_Nota}`}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+
+          {/* ── NOTES ── */}
+          {tab === 'notes' && (
+            <textarea
+              value={form.Notas}
+              onChange={(e) => setForm((f) => ({ ...f, Notas: e.target.value }))}
+              rows={14}
+              placeholder="Notas sobre este lead, contexto, observaciones..."
+              className="input-field"
+              style={{ resize: 'none', borderRadius: 12, padding: 14, lineHeight: 1.7 }}
+            />
+          )}
         </div>
+
+        {/* Footer */}
+        {(tab === 'info' || tab === 'notes') && (
+          <div className="px-6 py-4 border-t flex items-center justify-end gap-3" style={{ borderColor: 'var(--border)' }}>
+            <button onClick={onClose} className="btn btn-ghost">
+              Cancelar
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="btn btn-primary"
+            >
+              {saving ? (
+                <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" className="animate-spin">
+                  <path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                </svg>
+              ) : null}
+              {saving ? 'Guardando...' : lead ? 'Guardar cambios' : 'Crear lead'}
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* Sub-modal for activity */}
       {lead && (
         <ActivityModal
           isOpen={showActivityModal}

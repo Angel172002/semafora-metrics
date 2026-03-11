@@ -8,46 +8,38 @@ import LeadsTable from '@/components/crm/LeadsTable';
 import LeadModal from '@/components/crm/LeadModal';
 
 type ViewMode = 'kanban' | 'list';
-
 const LIST_LIMIT = 50;
 
 export default function CrmPage() {
   const [viewMode, setViewMode] = useState<ViewMode>('kanban');
 
-  // ── Shared meta ────────────────────────────────────────────────────────────
   const [stages, setStages] = useState<CrmStage[]>([]);
   const [users,  setUsers]  = useState<CrmUser[]>([]);
   const [stats,  setStats]  = useState<CrmStatsType | null>(null);
   const [metaLoading, setMetaLoading] = useState(true);
 
-  // ── Kanban: ONLY active leads (status=abierto) ────────────────────────────
   const [kanbanLeads,   setKanbanLeads]   = useState<CrmLead[]>([]);
   const [kanbanLoading, setKanbanLoading] = useState(true);
   const [kanbanError,   setKanbanError]   = useState<string | null>(null);
 
-  // ── List: server-side paginated ────────────────────────────────────────────
   const [listLeads,   setListLeads]   = useState<CrmLead[]>([]);
   const [listPage,    setListPage]    = useState(1);
   const [listTotal,   setListTotal]   = useState(0);
   const [listPages,   setListPages]   = useState(1);
   const [listLoading, setListLoading] = useState(false);
 
-  // List filters — controlled here, sent to API
   const [listSearch,  setListSearch]  = useState('');
   const [listStatus,  setListStatus]  = useState<'todos' | CrmLeadStatus>('todos');
   const [listOrigin,  setListOrigin]  = useState('');
   const [listStageId, setListStageId] = useState('');
 
-  // Debounce ref for search
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Modal state
   const [selectedLead,   setSelectedLead]   = useState<CrmLead | null>(null);
   const [isModalOpen,    setIsModalOpen]     = useState(false);
   const [modalMode,      setModalMode]       = useState<'view' | 'create'>('view');
   const [defaultStageId, setDefaultStageId] = useState<number | undefined>();
 
-  // ─── Fetch meta (stages + users + stats) ─────────────────────────────────
   const fetchMeta = useCallback(async () => {
     setMetaLoading(true);
     try {
@@ -67,7 +59,6 @@ export default function CrmPage() {
     }
   }, []);
 
-  // ─── Fetch Kanban: only active/open leads ────────────────────────────────
   const fetchKanban = useCallback(async () => {
     setKanbanLoading(true);
     setKanbanError(null);
@@ -83,13 +74,8 @@ export default function CrmPage() {
     }
   }, []);
 
-  // ─── Fetch List: one page at a time ──────────────────────────────────────
   const fetchList = useCallback(async (
-    page: number,
-    search: string,
-    status: string,
-    origin: string,
-    stageId: string,
+    page: number, search: string, status: string, origin: string, stageId: string,
   ) => {
     setListLoading(true);
     try {
@@ -116,20 +102,15 @@ export default function CrmPage() {
     }
   }, []);
 
-  // ─── Initial load ────────────────────────────────────────────────────────
   useEffect(() => {
     fetchMeta();
     fetchKanban();
   }, [fetchMeta, fetchKanban]);
 
-  // Load list page 1 when switching to list view
   useEffect(() => {
-    if (viewMode === 'list') {
-      fetchList(1, listSearch, listStatus, listOrigin, listStageId);
-    }
-  }, [viewMode]); // intentionally not exhaustive — only run on view switch
+    if (viewMode === 'list') fetchList(1, listSearch, listStatus, listOrigin, listStageId);
+  }, [viewMode]); // eslint-disable-line
 
-  // ─── List filter handlers ────────────────────────────────────────────────
   const handleListSearch = useCallback((v: string) => {
     setListSearch(v);
     if (searchTimer.current) clearTimeout(searchTimer.current);
@@ -157,20 +138,15 @@ export default function CrmPage() {
     fetchList(page, listSearch, listStatus, listOrigin, listStageId);
   }, [fetchList, listSearch, listStatus, listOrigin, listStageId]);
 
-  // ─── Kanban drag & drop ──────────────────────────────────────────────────
   const handleStageDrop = useCallback(async (leadId: number, newStageId: number) => {
     const stage = stages.find((s) => s.Id === newStageId);
     if (!stage) return;
-
-    // Optimistic update
     setKanbanLeads((prev) =>
-      prev.map((l) =>
-        l.Id === leadId
-          ? { ...l, Stage_Id: newStageId, Stage_Nombre: stage.Nombre, Stage_Color: stage.Color }
-          : l
+      prev.map((l) => l.Id === leadId
+        ? { ...l, Stage_Id: newStageId, Stage_Nombre: stage.Nombre, Stage_Color: stage.Color }
+        : l
       )
     );
-
     try {
       const res = await fetch(`/api/crm/leads/${leadId}`, {
         method: 'PATCH',
@@ -178,12 +154,9 @@ export default function CrmPage() {
         body: JSON.stringify({ Stage_Id: newStageId }),
       });
       if (!res.ok) fetchKanban();
-    } catch {
-      fetchKanban();
-    }
+    } catch { fetchKanban(); }
   }, [stages, fetchKanban]);
 
-  // ─── "Ver todos" (Kanban → List filtered by stage) ──────────────────────
   const handleViewAllStage = useCallback((stageId: number) => {
     const sid = String(stageId);
     setListStageId(sid);
@@ -194,127 +167,108 @@ export default function CrmPage() {
     fetchList(1, '', 'todos', '', sid);
   }, [fetchList]);
 
-  const handleSwitchToKanban = useCallback(() => {
-    setViewMode('kanban');
+  const handleLeadClick   = useCallback((lead: CrmLead) => {
+    setSelectedLead(lead); setModalMode('view'); setDefaultStageId(undefined); setIsModalOpen(true);
   }, []);
 
-  // ─── Modal handlers ──────────────────────────────────────────────────────
-  const handleLeadClick = useCallback((lead: CrmLead) => {
-    setSelectedLead(lead);
-    setModalMode('view');
-    setDefaultStageId(undefined);
-    setIsModalOpen(true);
+  const handleAddLead     = useCallback((stageId?: number) => {
+    setSelectedLead(null); setModalMode('create'); setDefaultStageId(stageId); setIsModalOpen(true);
   }, []);
 
-  const handleAddLead = useCallback((stageId?: number) => {
-    setSelectedLead(null);
-    setModalMode('create');
-    setDefaultStageId(stageId);
-    setIsModalOpen(true);
-  }, []);
+  const handleModalClose  = useCallback(() => { setIsModalOpen(false); setSelectedLead(null); }, []);
 
-  const handleModalClose = useCallback(() => {
-    setIsModalOpen(false);
-    setSelectedLead(null);
-  }, []);
-
-  const handleModalSave = useCallback(async () => {
-    setIsModalOpen(false);
-    setSelectedLead(null);
-    fetchMeta();
-    fetchKanban();
-    if (viewMode === 'list') {
-      fetchList(listPage, listSearch, listStatus, listOrigin, listStageId);
-    }
+  const handleModalSave   = useCallback(async () => {
+    setIsModalOpen(false); setSelectedLead(null);
+    fetchMeta(); fetchKanban();
+    if (viewMode === 'list') fetchList(listPage, listSearch, listStatus, listOrigin, listStageId);
   }, [fetchMeta, fetchKanban, fetchList, viewMode, listPage, listSearch, listStatus, listOrigin, listStageId]);
 
-  // ─── Render ──────────────────────────────────────────────────────────────
   const loading = metaLoading || kanbanLoading;
 
   return (
-    <div className="flex flex-col h-full min-h-screen bg-[var(--bg)]">
-      {/* ── Header ── */}
-      <div className="px-4 md:px-6 pt-6 pb-4 border-b border-white/10">
-        <div className="flex items-center justify-between mb-1">
+    <div className="flex flex-col min-h-screen" style={{ background: 'var(--bg)' }}>
+
+      {/* ── Top section: stats ── */}
+      <div className="px-4 md:px-6 pt-5 pb-0 border-b" style={{ borderColor: 'var(--border)', background: 'var(--surface)' }}>
+        {/* Header row */}
+        <div className="flex items-center justify-between mb-4">
           <div>
-            <h1 className="text-2xl font-bold text-white">CRM</h1>
-            <p className="text-sm text-[var(--text-muted)] mt-0.5">
-              Pipeline de ventas y gestión de clientes
-            </p>
+            <p className="section-title">Gestión de clientes</p>
+            <h1 className="text-xl font-extrabold" style={{ color: 'var(--text)', letterSpacing: '-0.01em' }}>
+              Pipeline de Ventas
+            </h1>
           </div>
           <button
             onClick={() => handleAddLead()}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--accent-green)] text-black font-semibold text-sm hover:opacity-90 transition-opacity"
+            className="btn btn-success"
           >
-            <span className="text-lg leading-none">+</span>
+            <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
             Nuevo Lead
           </button>
         </div>
-      </div>
 
-      {/* ── Stats ── */}
-      <div className="px-4 md:px-6 pt-4">
+        {/* Stats bar */}
         <CrmStats stats={stats} loading={metaLoading} />
-      </div>
 
-      {/* ── View Tabs ── */}
-      <div className="px-4 md:px-6 pt-4 pb-2 flex items-center gap-1">
-        <button
-          onClick={handleSwitchToKanban}
-          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-            viewMode === 'kanban'
-              ? 'bg-white/10 text-white'
-              : 'text-[var(--text-muted)] hover:text-white hover:bg-white/5'
-          }`}
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-              d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2" />
-          </svg>
-          Kanban
-        </button>
-        <button
-          onClick={() => setViewMode('list')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-            viewMode === 'list'
-              ? 'bg-white/10 text-white'
-              : 'text-[var(--text-muted)] hover:text-white hover:bg-white/5'
-          }`}
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-              d="M4 6h16M4 10h16M4 14h16M4 18h16" />
-          </svg>
-          Lista
-        </button>
-
-        {/* Kanban: active leads count / List: total filtered */}
-        {viewMode === 'kanban' && !kanbanLoading && (
-          <span className="ml-auto text-xs text-[var(--text-muted)] bg-white/5 px-3 py-1 rounded-full">
-            {kanbanLeads.length} activo{kanbanLeads.length !== 1 ? 's' : ''}
-          </span>
-        )}
-        {viewMode === 'list' && !listLoading && (
-          <span className="ml-auto text-xs text-[var(--text-muted)] bg-white/5 px-3 py-1 rounded-full">
-            {listTotal.toLocaleString('es-CO')} lead{listTotal !== 1 ? 's' : ''}
-          </span>
-        )}
+        {/* View tabs */}
+        <div className="flex items-center gap-0 mt-4 -mb-px">
+          <button
+            onClick={() => setViewMode('kanban')}
+            className={`tab-item ${viewMode === 'kanban' ? 'active' : ''}`}
+          >
+            <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="3" width="5" height="18" rx="1" />
+              <rect x="10" y="3" width="5" height="12" rx="1" />
+              <rect x="17" y="3" width="4" height="16" rx="1" />
+            </svg>
+            Kanban
+            {!kanbanLoading && (
+              <span className="tab-count" style={{
+                background: viewMode === 'kanban' ? 'rgba(99,102,241,0.18)' : 'var(--surface2)',
+                color: viewMode === 'kanban' ? 'var(--accent)' : 'var(--muted)',
+              }}>
+                {kanbanLeads.length}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={() => setViewMode('list')}
+            className={`tab-item ${viewMode === 'list' ? 'active' : ''}`}
+          >
+            <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="3" y1="6" x2="21" y2="6" />
+              <line x1="3" y1="12" x2="21" y2="12" />
+              <line x1="3" y1="18" x2="21" y2="18" />
+            </svg>
+            Lista
+            {viewMode === 'list' && !listLoading && listTotal > 0 && (
+              <span className="tab-count" style={{ background: 'rgba(99,102,241,0.18)', color: 'var(--accent)' }}>
+                {listTotal.toLocaleString('es-CO')}
+              </span>
+            )}
+          </button>
+        </div>
       </div>
 
       {/* ── Error ── */}
       {kanbanError && viewMode === 'kanban' && (
-        <div className="mx-4 md:mx-6 mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
-          {kanbanError} —{' '}
-          <button onClick={fetchKanban} className="underline hover:no-underline">
-            Reintentar
-          </button>
+        <div className="mx-4 md:mx-6 mt-4 p-3 rounded-xl text-sm flex items-center gap-2"
+          style={{ background: 'rgba(239,68,68,0.10)', border: '1px solid rgba(239,68,68,0.2)', color: '#f87171' }}>
+          <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+            <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+          </svg>
+          {kanbanError}
+          <button onClick={fetchKanban} className="underline hover:no-underline ml-1">Reintentar</button>
         </div>
       )}
 
-      {/* ── Main Content ── */}
+      {/* ── Main content ── */}
       <div className="flex-1 overflow-hidden">
         {viewMode === 'kanban' ? (
-          <div className="h-full">
+          <div className="h-full px-4 md:px-6 pt-5 pb-6">
             <KanbanBoard
               leads={kanbanLeads}
               stages={stages}
@@ -326,7 +280,7 @@ export default function CrmPage() {
             />
           </div>
         ) : (
-          <div className="px-4 md:px-6 pb-6">
+          <div className="px-4 md:px-6 pt-5 pb-8">
             <LeadsTable
               leads={listLeads}
               stages={stages}
@@ -349,7 +303,6 @@ export default function CrmPage() {
         )}
       </div>
 
-      {/* ── Lead Modal ── */}
       <LeadModal
         isOpen={isModalOpen}
         lead={selectedLead}
