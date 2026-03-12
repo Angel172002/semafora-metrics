@@ -34,7 +34,7 @@ export async function GET(req: NextRequest) {
   if (stageId)  filters.push(`(Stage_Id,eq,${stageId})`);
   if (status)   filters.push(`(Estado,eq,${status})`);
   if (userId)   filters.push(`(Usuario_Id,eq,${userId})`);
-  if (origin)   filters.push(`(Origen,eq,${encodeURIComponent(origin)})`);
+  if (origin)   filters.push(`(Origen,eq,${origin})`);
   if (search)   filters.push(`(Nombre,like,%${search}%)`);
 
   const params: Record<string, string> = { sort: '-Fecha_Creacion' };
@@ -42,12 +42,29 @@ export async function GET(req: NextRequest) {
   if (filters.length > 1)  params.where = filters.join('~and');
 
   // ── Helper: enrich a single lead with derived fields ──────────────────────
-  function enrich(lead: CrmLead): CrmLead {
-    const now        = new Date();
-    const createdAt  = lead.Fecha_Creacion      ? new Date(lead.Fecha_Creacion)      : now;
-    const lastContact = lead.Fecha_Ultimo_Contacto ? new Date(lead.Fecha_Ultimo_Contacto) : createdAt;
+  function enrich(
+    lead: CrmLead,
+    stageMap?: Map<number, { Color: string; Nombre: string }>,
+    firstStageId?: number,
+  ): CrmLead {
+    const now         = new Date();
+    const createdAt   = lead.Fecha_Creacion         ? new Date(lead.Fecha_Creacion)         : now;
+    const lastContact = lead.Fecha_Ultimo_Contacto  ? new Date(lead.Fecha_Ultimo_Contacto)  : createdAt;
+
+    // Resolve Stage_Id — if missing/0/NaN or doesn't exist in stageMap, fall back to first stage
+    let stageId = Number(lead.Stage_Id);
+    if (stageMap && stageMap.size > 0) {
+      if (!stageId || isNaN(stageId) || !stageMap.has(stageId)) {
+        stageId = firstStageId ?? [...stageMap.keys()][0];
+      }
+    }
+
+    const stage = stageMap?.get(stageId);
     return {
       ...lead,
+      Stage_Id:              stageId,
+      Stage_Color:           stage?.Color  || lead.Stage_Color  || '#6366f1',
+      Stage_Nombre:          stage?.Nombre || lead.Stage_Nombre || '',
       days_without_activity: Math.floor((now.getTime() - lastContact.getTime()) / 86400000),
     };
   }
@@ -69,7 +86,20 @@ export async function GET(req: NextRequest) {
       total = rows.length;
     }
 
-    const enriched = rows.map(enrich);
+    // Build stage color/name map if available
+    let stageMap: Map<number, { Color: string; Nombre: string }> | undefined;
+    let firstStageId: number | undefined;
+    if (TABLE_STAGES) {
+      try {
+        const stages = await listAllRows<{ Id: number; Nombre: string; Color: string; Orden: number }>(
+          PROJECT, TABLE_STAGES, { fields: 'Id,Nombre,Color,Orden', sort: 'Orden' }
+        );
+        stageMap = new Map(stages.map((s) => [Number(s.Id), { Color: s.Color, Nombre: s.Nombre }]));
+        if (stages.length > 0) firstStageId = Number(stages[0].Id);
+      } catch { /* ignore */ }
+    }
+
+    const enriched = rows.map((r) => enrich(r, stageMap, firstStageId));
 
     // Optionally attach activity counts (only for full fetch, too slow for paginated)
     let finalRows = enriched;
@@ -119,16 +149,23 @@ export async function POST(req: NextRequest) {
       Email:                body.Email                 || '',
       Empresa:              body.Empresa               || '',
       Origen:               body.Origen                || 'Otro',
+      Ciudad:               body.Ciudad                || '',
       ID_Campana:           body.ID_Campana            || '',
       Nombre_Campana:       body.Nombre_Campana        || '',
       Plataforma_Origen:    body.Plataforma_Origen     || '',
       Valor_Estimado:       Number(body.Valor_Estimado) || 0,
+      Precio_Plan:          Number(body.Precio_Plan)   || 0,
+      Plan_Separe:          Number(body.Plan_Separe)   || 0,
+      Comprobante:          Boolean(body.Comprobante)  || false,
       Stage_Id:             Number(body.Stage_Id)      || 1,
-      Stage_Nombre:         stageName || 'Nuevo Lead',
+      Stage_Nombre:         stageName || 'Agendamiento Tenida',
       Stage_Color:          stageColor,
       Usuario_Id:           Number(body.Usuario_Id)    || 1,
-      Usuario_Nombre:       body.Usuario_Nombre        || 'Administrador',
+      Usuario_Nombre:       body.Usuario_Nombre        || 'Oscar',
       Fecha_Creacion:       now,
+      Fecha_Inicio:         body.Fecha_Inicio          || '',
+      Dia_Primer_Contacto:  body.Dia_Primer_Contacto   || '',
+      Dia_Cierre:           body.Dia_Cierre            || '',
       Fecha_Ultimo_Contacto: now,
       Proxima_Accion_Fecha: body.Proxima_Accion_Fecha  || '',
       Estado:               'abierto',

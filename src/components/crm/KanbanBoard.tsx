@@ -168,9 +168,68 @@ function KanbanColumn({ stage, leads, loading, onLeadClick, onAddLead, onStageDr
 }
 
 export default function KanbanBoard({ stages, leads, loading, onLeadClick, onAddLead, onStageDrop, onViewAllStage }: Props) {
+  const [seeding, setSeeding] = useState(false);
+  const [seedDone, setSeedDone] = useState(false);
+
   const sortedStages = [...stages].sort((a, b) => a.Orden - b.Orden);
 
+  // Leads whose Stage_Id doesn't match any known stage — show in a fallback column
+  const knownStageIds = new Set(sortedStages.map((s) => Number(s.Id)));
+  const orphanLeads   = leads.filter((l) => !knownStageIds.has(Number(l.Stage_Id)));
+
+  const FALLBACK_STAGE: CrmStage = {
+    Id: 0, Nombre: 'Sin etapa', Orden: -1,
+    Color: '#6b7280', Es_Ganado: false, Es_Perdido: false, Activo: true,
+  };
+
+  async function handleSeedStages() {
+    setSeeding(true);
+    try {
+      const res  = await fetch('/api/crm/stages', { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        setSeedDone(true);
+        // Reload page to pick up new stages
+        window.location.reload();
+      } else {
+        alert('Error: ' + (data.error || 'No se pudieron crear las etapas'));
+      }
+    } catch {
+      alert('Error de red al inicializar las etapas.');
+    } finally {
+      setSeeding(false);
+    }
+  }
+
+  // Banner when stages table is empty (shown regardless of orphan leads)
+  const noStagesBanner = !loading && sortedStages.length === 0;
+
   return (
+    <div className="flex flex-col gap-4">
+      {noStagesBanner && (
+        <div className="flex items-center justify-between gap-4 rounded-xl px-4 py-3"
+          style={{ background: 'rgba(99,102,241,0.08)', border: '1.5px solid rgba(99,102,241,0.22)' }}>
+          <div className="flex items-center gap-3 min-w-0">
+            <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="#6366f1" strokeWidth="2">
+              <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+            </svg>
+            <div>
+              <p className="text-sm font-bold" style={{ color: 'var(--text)' }}>El pipeline no tiene etapas configuradas</p>
+              <p className="text-xs" style={{ color: 'var(--muted)' }}>
+                Crea las 7 etapas por defecto para organizar tus {leads.length} leads correctamente.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={handleSeedStages}
+            disabled={seeding || seedDone}
+            className="btn btn-primary flex-shrink-0"
+            style={{ opacity: seeding ? 0.6 : 1, fontSize: 12 }}
+          >
+            {seeding ? 'Inicializando…' : seedDone ? '✓ Listo' : 'Inicializar Pipeline'}
+          </button>
+        </div>
+      )}
     <div className="flex gap-4 overflow-x-auto pb-4" style={{ minHeight: 300 }}>
       {loading && stages.length === 0
         ? Array.from({ length: 4 }).map((_, i) => (
@@ -181,19 +240,34 @@ export default function KanbanBoard({ stages, leads, loading, onLeadClick, onAdd
               </div>
             </div>
           ))
-        : sortedStages.map((stage) => (
-            <KanbanColumn
-              key={stage.Id}
-              stage={stage}
-              leads={leads.filter((l) => l.Stage_Id === stage.Id)}
-              loading={loading}
-              onLeadClick={onLeadClick}
-              onAddLead={onAddLead}
-              onStageDrop={onStageDrop}
-              onViewAllStage={onViewAllStage}
-            />
-          ))
+        : <>
+            {orphanLeads.length > 0 && (
+              <KanbanColumn
+                key="orphan"
+                stage={FALLBACK_STAGE}
+                leads={orphanLeads}
+                loading={loading}
+                onLeadClick={onLeadClick}
+                onAddLead={onAddLead}
+                onStageDrop={onStageDrop}
+                onViewAllStage={onViewAllStage}
+              />
+            )}
+            {sortedStages.map((stage) => (
+              <KanbanColumn
+                key={stage.Id}
+                stage={stage}
+                leads={leads.filter((l) => Number(l.Stage_Id) === Number(stage.Id))}
+                loading={loading}
+                onLeadClick={onLeadClick}
+                onAddLead={onAddLead}
+                onStageDrop={onStageDrop}
+                onViewAllStage={onViewAllStage}
+              />
+            ))}
+          </>
       }
+    </div>
     </div>
   );
 }

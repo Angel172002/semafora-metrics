@@ -14,8 +14,8 @@ interface Props {
   onPageChange: (page: number) => void;
   search: string;
   onSearchChange: (v: string) => void;
-  status: 'todos' | CrmLeadStatus;
-  onStatusChange: (v: 'todos' | CrmLeadStatus) => void;
+  status: 'todos' | CrmLeadStatus | 'archivado';
+  onStatusChange: (v: 'todos' | CrmLeadStatus | 'archivado') => void;
   origin: string;
   onOriginChange: (v: string) => void;
   stageId: string;
@@ -29,28 +29,30 @@ type SortKey = keyof Pick<CrmLead,
 >;
 type SortDir = 'asc' | 'desc';
 
-const STATUS_FILTERS: { value: 'todos' | CrmLeadStatus; label: string }[] = [
-  { value: 'todos',   label: 'Todos'    },
-  { value: 'abierto', label: 'Abiertos' },
-  { value: 'ganado',  label: 'Ganados'  },
-  { value: 'perdido', label: 'Perdidos' },
+const STATUS_FILTERS: { value: 'todos' | CrmLeadStatus | 'archivado'; label: string }[] = [
+  { value: 'todos',     label: 'Todos'      },
+  { value: 'abierto',   label: 'Abiertos'   },
+  { value: 'ganado',    label: 'Ganados'    },
+  { value: 'perdido',   label: 'Perdidos'   },
+  { value: 'archivado', label: 'Archivados' },
 ];
 
-const STATUS_BADGE: Record<CrmLeadStatus, { bg: string; text: string; label: string }> = {
-  abierto: { bg: 'rgba(59,130,246,0.13)',  text: '#60a5fa', label: 'Abierto' },
-  ganado:  { bg: 'rgba(74,222,128,0.13)',  text: '#4ade80', label: 'Ganado'  },
-  perdido: { bg: 'rgba(248,113,113,0.13)', text: '#f87171', label: 'Perdido' },
+const STATUS_BADGE: Record<string, { bg: string; text: string; label: string }> = {
+  abierto:   { bg: 'rgba(59,130,246,0.13)',   text: '#60a5fa', label: 'Abierto'   },
+  ganado:    { bg: 'rgba(74,222,128,0.13)',   text: '#4ade80', label: 'Ganado'    },
+  perdido:   { bg: 'rgba(248,113,113,0.13)', text: '#f87171', label: 'Perdido'   },
+  archivado: { bg: 'rgba(156,163,175,0.13)', text: '#9ca3af', label: 'Archivado' },
 };
 
 const ORIGIN_OPTIONS: Array<{ value: string; label: string }> = [
-  { value: '',           label: 'Todos los orígenes' },
-  { value: 'Meta Ads',   label: 'Meta Ads'           },
-  { value: 'Google Ads', label: 'Google Ads'         },
-  { value: 'TikTok Ads', label: 'TikTok Ads'         },
-  { value: 'WhatsApp',   label: 'WhatsApp'           },
-  { value: 'Orgánico',   label: 'Orgánico'           },
-  { value: 'Referido',   label: 'Referido'           },
-  { value: 'Otro',       label: 'Otro'               },
+  { value: '',              label: 'Todos los orígenes' },
+  { value: 'Meta Ads',      label: 'Meta Ads'           },
+  { value: 'Google Ads',    label: 'Google Ads'         },
+  { value: 'TikTok Ads',    label: 'TikTok Ads'         },
+  { value: 'Orgánico',      label: 'Orgánico'           },
+  { value: 'Chatbot Lex',   label: 'Chatbot Lex'        },
+  { value: 'Referido',      label: 'Referido'           },
+  { value: 'Otro',          label: 'Otro'               },
 ];
 
 function formatDate(iso: string): string {
@@ -73,12 +75,22 @@ function getAvatarColor(name: string): string {
   return colors[Math.abs(h) % colors.length];
 }
 
+function toWALink(phone: string): string {
+  const clean = phone.replace(/\D/g, '');
+  const num = clean.startsWith('57') ? clean : `57${clean}`;
+  return `https://wa.me/${num}`;
+}
+
 function exportCsv(leads: CrmLead[]) {
-  const headers = ['Nombre','Teléfono','Email','Empresa','Origen','Campaña','Etapa','Asesor','Valor Estimado','Estado','Días sin actividad','Próxima acción','Fecha creación'];
+  const headers = ['ID','Nombre','Teléfono','Origen','Ciudad','Asesor','Etapa','Precio Plan','Plan Separe','Comprobante','Estado','Días sin actividad','Fecha Inicio','Día Cierre'];
   const rows = leads.map((l) => [
-    l.Nombre, l.Telefono, l.Email, l.Empresa, l.Origen, l.Nombre_Campana,
-    l.Stage_Nombre, l.Usuario_Nombre, l.Valor_Estimado, l.Estado,
-    l.days_without_activity ?? 0, l.Proxima_Accion_Fecha || '', l.Fecha_Creacion,
+    `#SEM-${String(l.Id).padStart(3,'0')}`,
+    l.Nombre, l.Telefono, l.Origen, l.Ciudad || '',
+    l.Usuario_Nombre, l.Stage_Nombre,
+    l.Precio_Plan || 0, l.Plan_Separe || 0,
+    l.Comprobante ? 'Sí' : 'No',
+    l.Estado, l.days_without_activity ?? 0,
+    l.Fecha_Inicio || '', l.Dia_Cierre || '',
   ]);
   const csv = [headers, ...rows].map((r) => r.map((c) => `"${String(c ?? '').replace(/"/g,'""')}"`).join(',')).join('\n');
   const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
@@ -91,7 +103,7 @@ function exportCsv(leads: CrmLead[]) {
 function SkeletonRow() {
   return (
     <tr>
-      {Array.from({ length: 10 }).map((_, i) => (
+      {Array.from({ length: 9 }).map((_, i) => (
         <td key={i} className="px-4 py-3">
           <div className="skeleton h-3" style={{ width: `${50 + (i % 4) * 15}%` }} />
         </td>
@@ -189,16 +201,10 @@ export default function LeadsTable({
               className="px-3 py-1 rounded-full text-xs font-semibold transition-all"
               style={{
                 background: active
-                  ? value === 'todos'   ? 'var(--accent)'
-                  : value === 'ganado'  ? 'rgba(74,222,128,0.2)'
-                  : value === 'perdido' ? 'rgba(248,113,113,0.2)'
-                  :                       'rgba(59,130,246,0.2)'
+                  ? value === 'todos' ? 'var(--accent)' : (STATUS_BADGE[value]?.bg ?? 'rgba(59,130,246,0.2)')
                   : 'var(--chip-bg)',
                 color: active
-                  ? value === 'todos'   ? '#fff'
-                  : value === 'ganado'  ? '#4ade80'
-                  : value === 'perdido' ? '#f87171'
-                  :                       '#60a5fa'
+                  ? value === 'todos' ? '#fff' : (STATUS_BADGE[value]?.text ?? '#60a5fa')
                   : 'var(--muted)',
                 border: '1px solid var(--border)',
                 cursor: 'pointer',
@@ -220,15 +226,14 @@ export default function LeadsTable({
             <thead>
               <tr>
                 {th('Nombre', 'Nombre')}
-                {th('Teléfono', 'Telefono')}
-                {th('Origen', 'Origen')}
-                {th('Campaña', 'Nombre_Campana')}
                 {th('Etapa', 'Stage_Nombre')}
                 {th('Asesor', 'Usuario_Nombre')}
-                {th('Valor Est.', 'Valor_Estimado', 'right')}
+                {th('Origen', 'Origen')}
+                {th('Precio Plan', 'Valor_Estimado', 'right')}
                 {th('Sin act.', 'days_without_activity', 'right')}
                 {th('Próx. acción', 'Proxima_Accion_Fecha')}
                 <th>Estado</th>
+                <th style={{ textAlign: 'center' }}>Acciones</th>
               </tr>
             </thead>
             <tbody>
@@ -244,7 +249,8 @@ export default function LeadsTable({
                 sorted.map((lead) => {
                   const daysWithout = lead.days_without_activity ?? 0;
                   const statusBadge = STATUS_BADGE[lead.Estado] ?? STATUS_BADGE.abierto;
-                  const stageColor  = lead.Stage_Color ?? 'var(--muted2)';
+                  const stageColor  = lead.Stage_Color ?? '#6366f1';
+                  const hasPhone    = !!(lead.Telefono && lead.Telefono.trim());
 
                   return (
                     <tr
@@ -252,8 +258,8 @@ export default function LeadsTable({
                       onClick={() => onLeadClick(lead)}
                       style={{ cursor: 'pointer' }}
                     >
-                      {/* Nombre con avatar */}
-                      <td style={{ maxWidth: 180 }}>
+                      {/* Nombre con avatar + teléfono debajo */}
+                      <td style={{ maxWidth: 220 }}>
                         <div className="flex items-center gap-2">
                           <div
                             className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 text-[10px] font-bold text-white"
@@ -261,24 +267,21 @@ export default function LeadsTable({
                           >
                             {getInitials(lead.Nombre)}
                           </div>
-                          <span className="text-sm font-semibold truncate" style={{ color: 'var(--text)' }} title={lead.Nombre}>
-                            {lead.Nombre}
-                          </span>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              <p className="text-sm font-semibold truncate" style={{ color: 'var(--text)' }} title={lead.Nombre}>
+                                {lead.Nombre}
+                              </p>
+                              {lead.Comprobante && (
+                                <span className="text-[9px] font-bold px-1 py-0.5 rounded flex-shrink-0"
+                                  style={{ background: 'rgba(16,185,129,0.12)', color: '#10b981' }}>✓</span>
+                              )}
+                            </div>
+                            <p className="text-[10px]" style={{ color: 'var(--muted2)' }}>
+                              {lead.Ciudad || ''}{lead.Ciudad && hasPhone ? ' · ' : ''}{hasPhone ? lead.Telefono : '⚠ Sin teléfono'}
+                            </p>
+                          </div>
                         </div>
-                      </td>
-
-                      <td style={{ color: 'var(--muted)', fontSize: 12, whiteSpace: 'nowrap' }}>
-                        {lead.Telefono || '—'}
-                      </td>
-
-                      <td style={{ color: 'var(--muted)', fontSize: 12, whiteSpace: 'nowrap' }}>
-                        {lead.Origen || '—'}
-                      </td>
-
-                      <td style={{ maxWidth: 140 }}>
-                        <span className="text-xs truncate block" style={{ color: 'var(--muted)' }} title={lead.Nombre_Campana}>
-                          {lead.Nombre_Campana || '—'}
-                        </span>
                       </td>
 
                       {/* Etapa con dot de color */}
@@ -293,8 +296,12 @@ export default function LeadsTable({
                         {lead.Usuario_Nombre || '—'}
                       </td>
 
+                      <td style={{ color: 'var(--muted)', fontSize: 12, whiteSpace: 'nowrap' }}>
+                        {lead.Origen || '—'}
+                      </td>
+
                       <td className="text-right font-mono text-xs font-semibold" style={{ color: '#4ade80', whiteSpace: 'nowrap' }}>
-                        {lead.Valor_Estimado > 0 ? formatCOP(lead.Valor_Estimado, true) : '—'}
+                        {(lead.Precio_Plan ?? 0) > 0 ? formatCOP(lead.Precio_Plan!, true) : '—'}
                       </td>
 
                       {/* Días sin actividad con semáforo */}
@@ -315,6 +322,55 @@ export default function LeadsTable({
                         <span className="badge" style={{ background: statusBadge.bg, color: statusBadge.text, border: 'none' }}>
                           {statusBadge.label}
                         </span>
+                      </td>
+
+                      {/* Acciones rápidas */}
+                      <td onClick={(e) => e.stopPropagation()} style={{ whiteSpace: 'nowrap' }}>
+                        <div className="flex items-center justify-center gap-1.5">
+                          {hasPhone ? (
+                            <a
+                              href={toWALink(lead.Telefono)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="btn btn-icon"
+                              style={{ background: 'rgba(37,211,102,0.12)', color: '#25D366', border: '1px solid rgba(37,211,102,0.2)', width: 30, height: 30, flexShrink: 0 }}
+                              title={`WhatsApp: ${lead.Telefono}`}
+                            >
+                              <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347zM12 0C5.373 0 0 5.373 0 12c0 2.124.557 4.118 1.527 5.845L0 24l6.336-1.502A11.938 11.938 0 0012 24c6.627 0 12-5.373 12-12S18.627 0 12 0zm0 22c-1.89 0-3.663-.5-5.19-1.373l-.373-.217-3.863.916.952-3.773-.237-.388A9.953 9.953 0 012 12C2 6.477 6.477 2 12 2s10 4.477 10 10-4.477 10-10 10z"/>
+                              </svg>
+                            </a>
+                          ) : (
+                            <button
+                              onClick={() => onLeadClick(lead)}
+                              className="btn btn-icon"
+                              style={{ background: 'rgba(251,146,60,0.12)', color: '#fb923c', border: '1px solid rgba(251,146,60,0.2)', width: 30, height: 30, flexShrink: 0 }}
+                              title="Agregar teléfono"
+                            >
+                              📱
+                            </button>
+                          )}
+                          <button
+                            onClick={() => onLeadClick(lead)}
+                            className="btn btn-icon"
+                            style={{ background: 'var(--surface2)', color: 'var(--muted)', border: '1px solid var(--border)', width: 30, height: 30, flexShrink: 0 }}
+                            title="Editar lead"
+                          >
+                            <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                              <path d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+                            </svg>
+                          </button>
+                          <a
+                            href={`/crm/leads/${lead.Id}`}
+                            className="btn btn-icon"
+                            style={{ background: 'rgba(99,102,241,0.10)', color: 'var(--accent)', border: '1px solid rgba(99,102,241,0.2)', width: 30, height: 30, flexShrink: 0, textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                            title="Ver detalle completo"
+                          >
+                            <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+                            </svg>
+                          </a>
+                        </div>
                       </td>
                     </tr>
                   );

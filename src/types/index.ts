@@ -173,6 +173,9 @@ export interface CampaignTableRow {
   spent: number;
   reach: number;
   frequency: number;
+  /** Budget from Meta API (optional — populated on client after separate fetch) */
+  budget?: number;
+  budget_type?: 'daily' | 'lifetime' | 'none';
 }
 
 export interface AdSetTableRow {
@@ -248,6 +251,33 @@ export interface FollowerTableRow {
   cost_per_follower: number;
 }
 
+// ─── Sprint 3: Advanced chart types ───────────────────────────────────────────
+export interface FunnelStep {
+  label: string;
+  value: number;
+  pct: number;       // % relative to first step (impressions)
+  dropOff: number;   // % dropped from previous step
+  color: string;
+}
+
+export interface HeatmapDay {
+  day: string;              // 'Lun', 'Mar', etc.
+  dayIndex: number;         // 0=Sun, 1=Mon … 6=Sat
+  spent: number;
+  results: number;
+  clicks: number;
+  spentIntensity: number;   // 0–1 normalized for color
+  resultsIntensity: number;
+}
+
+export interface PeriodComparisonItem {
+  label: string;
+  current: number;
+  previous: number;
+  change: number;
+  isMonetary: boolean;
+}
+
 export interface DashboardData {
   kpis: KpiSummary;
   dailyChart: DailyChartPoint[];
@@ -259,6 +289,9 @@ export interface DashboardData {
   networkBreakdown: NetworkBreakdownItem[];
   engagementTable: EngagementTableRow[];
   followerTable: FollowerTableRow[];
+  funnelData: FunnelStep[];
+  weeklyHeatmap: HeatmapDay[];
+  periodComparison: PeriodComparisonItem[];
   lastSync: string | null;
   isMockData: boolean;
 }
@@ -279,8 +312,8 @@ export interface SyncResponse {
 
 // ─── CRM Types ────────────────────────────────────────────────────────────────
 
-export type CrmLeadStatus = 'abierto' | 'ganado' | 'perdido';
-export type CrmActivityType = 'Llamada' | 'WhatsApp' | 'Email' | 'Reunión' | 'Nota';
+export type CrmLeadStatus = 'abierto' | 'ganado' | 'perdido' | 'archivado';
+export type CrmActivityType = 'Llamada' | 'WhatsApp' | 'Envío de Propuesta' | 'Reunión';
 export type CrmActivityResult =
   | 'Contactó'
   | 'No contestó'
@@ -294,8 +327,8 @@ export type CrmLeadOrigin =
   | 'Google Ads'
   | 'TikTok Ads'
   | 'Orgánico'
+  | 'Chatbot Lex'
   | 'Referido'
-  | 'WhatsApp'
   | 'Otro';
 
 export interface CrmStage {
@@ -323,16 +356,23 @@ export interface CrmLead {
   Email: string;
   Empresa: string;
   Origen: CrmLeadOrigin | string;
+  Ciudad?: string;
   ID_Campana: string;
   Nombre_Campana: string;
   Plataforma_Origen: string;
   Valor_Estimado: number;
+  Precio_Plan?: number;
+  Plan_Separe?: number;
+  Comprobante?: boolean;
   Stage_Id: number;
   Stage_Nombre: string;
   Stage_Color?: string;
   Usuario_Id: number;
   Usuario_Nombre: string;
   Fecha_Creacion: string;
+  Fecha_Inicio?: string;
+  Dia_Primer_Contacto?: string;
+  Dia_Cierre?: string;
   Fecha_Ultimo_Contacto: string;
   Proxima_Accion_Fecha: string;
   Estado: CrmLeadStatus;
@@ -359,6 +399,24 @@ export interface CrmActivity {
   Proxima_Accion_Nota: string;
 }
 
+export interface AsesorStats {
+  id: number;
+  nombre: string;
+  activos: number;
+  ganados: number;
+  perdidos: number;
+  revenue: number;         // suma Valor_Estimado de ganados
+  tasa_cierre: number;     // % ganados / (ganados + perdidos)
+}
+
+export interface StageStats {
+  id: number;
+  nombre: string;
+  color: string;
+  count: number;
+  valor_total: number;
+}
+
 export interface CrmStats {
   leads_total: number;
   leads_abiertos: number;
@@ -371,6 +429,9 @@ export interface CrmStats {
   ticket_promedio: number;
   leads_sin_actividad: number;  // días sin actividad > 48h
   ciclo_promedio_dias: number;  // días promedio de apertura a cierre
+  forecast: number;             // pipeline_total * (tasa_cierre / 100)
+  ranking_asesores: AsesorStats[];
+  distribucion_etapas: StageStats[];
 }
 
 // ─── CRM API Responses ────────────────────────────────────────────────────────
