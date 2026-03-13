@@ -66,8 +66,8 @@ async function sendEmail(to: string, subject: string, html: string): Promise<voi
 }
 
 export async function POST(req: NextRequest) {
-  const authError = requireAuth(req);
-  if (authError) return authError;
+  const session = requireAuth(req);
+  if (!session) return NextResponse.json({ success: false, error: 'No autorizado' }, { status: 401 });
 
   const body = await req.json().catch(() => ({}));
   const parsed = ReportSchema.safeParse(body);
@@ -155,8 +155,8 @@ export async function POST(req: NextRequest) {
 
 // GET — preview del reporte en el navegador
 export async function GET(req: NextRequest) {
-  const authError = requireAuth(req);
-  if (authError) return authError;
+  const session = requireAuth(req);
+  if (!session) return new Response('No autorizado', { status: 401 });
 
   const PROJECT  = getProjectId(req);
   const tenantId = getTenantId(req);

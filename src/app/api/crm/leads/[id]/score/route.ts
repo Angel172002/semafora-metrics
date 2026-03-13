@@ -17,8 +17,8 @@ const TTL_MS = 5 * 60 * 1000; // 5 min
 type RouteParams = { params: Promise<{ id: string }> };
 
 export async function GET(req: NextRequest, { params }: RouteParams) {
-  const authError = requireAuth(req);
-  if (authError) return authError;
+  const session = requireAuth(req);
+  if (!session) return NextResponse.json({ success: false, error: 'No autorizado' }, { status: 401 });
 
   const PROJECT = getProjectId(req);
   const { id } = await params;

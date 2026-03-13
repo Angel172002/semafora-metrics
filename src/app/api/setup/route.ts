@@ -118,10 +118,20 @@ const CRM_USERS_COLUMNS = [
 // ─── Tenants table ────────────────────────────────────────────────────────────
 const TENANTS_COLUMNS = [
   { column_name: 'Nombre',        uidt: 'SingleLineText' },
+  { column_name: 'Industria',     uidt: 'SingleLineText' },
   { column_name: 'Plan',          uidt: 'SingleLineText' },   // trial | starter | agencia | enterprise
   { column_name: 'Status',        uidt: 'SingleLineText' },   // active | suspended | canceled
   { column_name: 'Created_At',    uidt: 'DateTime' },
   { column_name: 'Trial_Ends_At', uidt: 'DateTime' },
+];
+
+// ─── Tenant_Config table (key-value store per tenant) ─────────────────────────
+const TENANT_CONFIG_COLUMNS = [
+  { column_name: 'Tenant_Id',   uidt: 'Number' },
+  { column_name: 'Key',         uidt: 'SingleLineText' },
+  { column_name: 'Value',       uidt: 'LongText' },
+  { column_name: 'Created_At',  uidt: 'DateTime' },
+  { column_name: 'Updated_At',  uidt: 'DateTime' },
 ];
 
 // ─── Subscriptions table ──────────────────────────────────────────────────────
@@ -351,6 +361,24 @@ export async function POST() {
       const msg = String(e);
       errors.push(`Tenants table: ${msg.slice(0, 200)}`);
       console.error('[setup] Error creating Tenants table:', msg);
+    }
+  }
+
+  // 7c. Create Tenant_Config table (key-value config per tenant)
+  const existingConfigId = process.env.NOCODB_TABLE_CONFIG;
+  if (existingConfigId) {
+    console.log(`[setup] Tenant_Config table already exists: ${existingConfigId}`);
+    results.NOCODB_TABLE_CONFIG = existingConfigId;
+  } else {
+    try {
+      console.log('[setup] Creating Tenant_Config table...');
+      const id = await createTable(NOCODB_PROJECT, 'Tenant_Config', TENANT_CONFIG_COLUMNS);
+      results.NOCODB_TABLE_CONFIG = id;
+      console.log(`[setup] ✓ Tenant_Config: ${id}`);
+    } catch (e) {
+      const msg = String(e);
+      errors.push(`Tenant_Config table: ${msg.slice(0, 200)}`);
+      console.error('[setup] Error creating Tenant_Config table:', msg);
     }
   }
 

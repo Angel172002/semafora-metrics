@@ -52,9 +52,17 @@ export default function OnboardingPage() {
 
   async function finish() {
     setSaving(true);
-    // Optionally save env vars / settings (fire-and-forget)
-    // For now, just go to dashboard
-    setTimeout(() => router.push('/'), 1000);
+    try {
+      await fetch('/api/onboarding', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(state),
+      });
+    } catch {
+      // Non-blocking — even if it fails, go to dashboard
+    } finally {
+      router.push('/');
+    }
   }
 
   const progress = ((step - 1) / (STEPS.length - 1)) * 100;
