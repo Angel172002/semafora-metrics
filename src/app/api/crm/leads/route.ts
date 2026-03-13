@@ -1,14 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { listAllRows, listRowsPage, insertRow } from '@/lib/nocodb';
+import { getProjectId, getTenantId, requireAuth } from '@/lib/apiAuth';
+import { validate, LeadCreateSchema } from '@/lib/validators';
+import { audit } from '@/lib/audit';
+import { cacheDel, CacheKeys } from '@/lib/cache';
+import { getClientIp } from '@/lib/rateLimit';
 import type { CrmLead } from '@/types';
 
-const PROJECT          = process.env.NOCODB_PROJECT_ID            || '';
 const TABLE            = process.env.NOCODB_TABLE_CRM_LEADS       || '';
 const TABLE_STAGES     = process.env.NOCODB_TABLE_CRM_STAGES      || '';
 const TABLE_ACTIVITIES = process.env.NOCODB_TABLE_CRM_ACTIVITIES  || '';
 
 // ─── GET /api/crm/leads ───────────────────────────────────────────────────────
 export async function GET(req: NextRequest) {
+  const PROJECT = getProjectId(req);
   if (!TABLE) {
     return NextResponse.json(
       { success: false, data: [], total: 0, pages: 1, error: 'CRM Leads table not configured. Run POST /api/setup first.' },
@@ -126,10 +131,18 @@ export async function GET(req: NextRequest) {
 
 // ─── POST /api/crm/leads ──────────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
+  const PROJECT  = getProjectId(req);
+  const tenantId = getTenantId(req);
+  const session  = requireAuth(req);
   if (!TABLE) return NextResponse.json({ success: false, error: 'CRM Leads table not configured.' }, { status: 503 });
 
   try {
-    const body = await req.json();
+    const raw    = await req.json().catch(() => ({}));
+    const result = validate(LeadCreateSchema, raw);
+    if (!result.success) {
+      return NextResponse.json({ success: false, error: result.error }, { status: 400 });
+    }
+    const body = result.data;
 
     // Lookup stage name & color if only stage_id provided
     let stageName  = body.Stage_Nombre || '';
@@ -173,6 +186,20 @@ export async function POST(req: NextRequest) {
       Notas:                body.Notas                 || '',
       Fecha_Cierre:         '',
     });
+
+    audit({
+      tenantId,
+      userId:    session?.sub    ?? 0,
+      userEmail: session?.email  ?? '',
+      action:    'lead.create',
+      resource:  'crm_lead',
+      resourceId: String((row as { Id?: number })?.Id ?? 0),
+      ip:        getClientIp(req),
+      after:     { nombre: body.Nombre, origen: body.Origen },
+    });
+
+    // Invalidate CRM stats cache
+    cacheDel(CacheKeys.crmStats(tenantId)).catch(() => null);
 
     return NextResponse.json({ success: true, data: row }, { status: 201 });
   } catch (e) {

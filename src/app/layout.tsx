@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { Bebas_Neue, Poppins, Space_Mono } from 'next/font/google';
 import Navigation from '@/components/Navigation';
+import { ToastProvider } from '@/components/Toast';
 import './globals.css';
 
 const bebasNeue = Bebas_Neue({
@@ -39,10 +40,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       className={`${bebasNeue.variable} ${poppins.variable} ${spaceMono.variable}`}
     >
       <body className="flex min-h-screen bg-[var(--bg)]">
-        <Navigation />
-        <main className="flex-1 min-w-0 pb-16 md:pb-0">
-          {children}
-        </main>
+        <ToastProvider>
+          <Navigation />
+          <main className="flex-1 min-w-0 pb-16 md:pb-0">
+            {children}
+          </main>
+        </ToastProvider>
       </body>
     </html>
   );

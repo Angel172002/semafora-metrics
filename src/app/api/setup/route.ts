@@ -6,8 +6,32 @@
 
 import { NextResponse } from 'next/server';
 import { createTable, addColumn, insertRow } from '@/lib/nocodb';
+import { AUDIT_LOG_COLUMNS } from '@/lib/audit';
 import fs from 'fs';
 import path from 'path';
+
+const NOCODB_URL     = process.env.NOCODB_URL     || 'http://localhost:8080';
+const NOCODB_API_KEY = process.env.NOCODB_API_KEY || '';
+
+/** Crea un índice en una tabla de NocoDB. Ignora si ya existe. */
+async function createIndex(tableId: string, column: string): Promise<void> {
+  try {
+    const res = await fetch(`${NOCODB_URL}/api/v1/db/meta/tables/${tableId}/indexes`, {
+      method: 'POST',
+      headers: { 'xc-token': NOCODB_API_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: `idx_${column.replace(/\s/g, '_').toLowerCase()}`, columns: [{ column }] }),
+    });
+    if (!res.ok) {
+      const err = await res.text();
+      // Ignorar si ya existe
+      if (!err.includes('already') && !err.includes('duplicate')) {
+        console.warn(`[setup] Index ${column} en ${tableId}: ${err.slice(0, 100)}`);
+      }
+    }
+  } catch (e) {
+    console.warn(`[setup] No se pudo crear índice ${column}:`, e);
+  }
+}
 
 const NOCODB_PROJECT = process.env.NOCODB_PROJECT_ID || '';
 const CAMPAIGN_TABLE_ID = process.env.NOCODB_TABLE_METRICS || '';
@@ -83,12 +107,47 @@ const CRM_STAGES_SEED = [
   { Nombre: 'Perdido',     Orden: 7, Color: '#ef4444', Es_Ganado: false, Es_Perdido: true,  Activo: true },
 ];
 
-// ─── CRM: Users table ─────────────────────────────────────────────────────────
+// ─── CRM: Users table (asesores) ──────────────────────────────────────────────
 const CRM_USERS_COLUMNS = [
   { column_name: 'Nombre', uidt: 'SingleLineText' },
   { column_name: 'Email',  uidt: 'Email' },
   { column_name: 'Rol',    uidt: 'SingleLineText' },
   { column_name: 'Activo', uidt: 'Checkbox' },
+];
+
+// ─── Tenants table ────────────────────────────────────────────────────────────
+const TENANTS_COLUMNS = [
+  { column_name: 'Nombre',        uidt: 'SingleLineText' },
+  { column_name: 'Plan',          uidt: 'SingleLineText' },   // trial | starter | agencia | enterprise
+  { column_name: 'Status',        uidt: 'SingleLineText' },   // active | suspended | canceled
+  { column_name: 'Created_At',    uidt: 'DateTime' },
+  { column_name: 'Trial_Ends_At', uidt: 'DateTime' },
+];
+
+// ─── Subscriptions table ──────────────────────────────────────────────────────
+const SUBSCRIPTIONS_COLUMNS = [
+  { column_name: 'Tenant_Id',              uidt: 'Number' },
+  { column_name: 'Stripe_Customer_Id',     uidt: 'SingleLineText' },
+  { column_name: 'Stripe_Subscription_Id', uidt: 'SingleLineText' },
+  { column_name: 'Plan',                   uidt: 'SingleLineText' },   // starter | agencia | enterprise
+  { column_name: 'Status',                 uidt: 'SingleLineText' },   // active | trialing | past_due | canceled
+  { column_name: 'Current_Period_End',     uidt: 'DateTime' },
+  { column_name: 'Cancel_At_Period_End',   uidt: 'Checkbox' },
+  { column_name: 'Trial_End',              uidt: 'DateTime' },
+];
+
+// ─── Auth: Users table (login credentials) ────────────────────────────────────
+const AUTH_USERS_COLUMNS = [
+  { column_name: 'Email',           uidt: 'Email' },
+  { column_name: 'Nombre',          uidt: 'SingleLineText' },
+  { column_name: 'Password_Hash',   uidt: 'SingleLineText' },
+  { column_name: 'Password_Salt',   uidt: 'SingleLineText' },
+  { column_name: 'Rol',             uidt: 'SingleLineText' },   // admin | analista | comercial
+  { column_name: 'Activo',          uidt: 'Checkbox' },
+  { column_name: 'Tenant_Id',       uidt: 'Number' },
+  { column_name: 'Tenant_Nombre',   uidt: 'SingleLineText' },
+  { column_name: 'Noco_Project_Id', uidt: 'SingleLineText' },
+  { column_name: 'Fecha_Creacion',  uidt: 'DateTime' },
 ];
 
 // ─── CRM: Leads table ─────────────────────────────────────────────────────────
@@ -277,7 +336,80 @@ export async function POST() {
     }
   }
 
-  // 7. Create CRM Activities table
+  // 7a. Create Tenants table (multi-tenant self-service)
+  const existingTenantsId = process.env.NOCODB_TABLE_TENANTS;
+  if (existingTenantsId) {
+    console.log(`[setup] Tenants table already exists: ${existingTenantsId}`);
+    results.NOCODB_TABLE_TENANTS = existingTenantsId;
+  } else {
+    try {
+      console.log('[setup] Creating Tenants table...');
+      const id = await createTable(NOCODB_PROJECT, 'Tenants', TENANTS_COLUMNS);
+      results.NOCODB_TABLE_TENANTS = id;
+      console.log(`[setup] ✓ Tenants: ${id}`);
+    } catch (e) {
+      const msg = String(e);
+      errors.push(`Tenants table: ${msg.slice(0, 200)}`);
+      console.error('[setup] Error creating Tenants table:', msg);
+    }
+  }
+
+  // 7b. Create Subscriptions table (Stripe billing state)
+  const existingSubsId = process.env.NOCODB_TABLE_SUBSCRIPTIONS;
+  if (existingSubsId) {
+    console.log(`[setup] Subscriptions table already exists: ${existingSubsId}`);
+    results.NOCODB_TABLE_SUBSCRIPTIONS = existingSubsId;
+  } else {
+    try {
+      console.log('[setup] Creating Subscriptions table...');
+      const id = await createTable(NOCODB_PROJECT, 'Subscriptions', SUBSCRIPTIONS_COLUMNS);
+      results.NOCODB_TABLE_SUBSCRIPTIONS = id;
+      console.log(`[setup] ✓ Subscriptions: ${id}`);
+    } catch (e) {
+      const msg = String(e);
+      errors.push(`Subscriptions table: ${msg.slice(0, 200)}`);
+      console.error('[setup] Error creating Subscriptions table:', msg);
+    }
+  }
+
+  // 8. Create Auth Users table (login credentials for multi-tenant auth)
+  const existingAuthUsersId = process.env.NOCODB_TABLE_USERS;
+  if (existingAuthUsersId) {
+    console.log(`[setup] Auth Users table already exists: ${existingAuthUsersId}`);
+    results.NOCODB_TABLE_USERS = existingAuthUsersId;
+  } else {
+    try {
+      console.log('[setup] Creating Auth Usuarios table...');
+      const id = await createTable(NOCODB_PROJECT, 'Auth Usuarios', AUTH_USERS_COLUMNS);
+      results.NOCODB_TABLE_USERS = id;
+      console.log(`[setup] ✓ Auth Usuarios: ${id}`);
+      console.log('[setup] ℹ️  Crea el primer admin con POST /api/auth/register después de añadir NOCODB_TABLE_USERS al .env.local');
+    } catch (e) {
+      const msg = String(e);
+      errors.push(`Auth Users table: ${msg.slice(0, 200)}`);
+      console.error('[setup] Error creating Auth Users table:', msg);
+    }
+  }
+
+  // 9a. Create Audit_Log table
+  const existingAuditId = process.env.NOCODB_TABLE_AUDIT_LOG;
+  if (existingAuditId) {
+    console.log(`[setup] Audit_Log table already exists: ${existingAuditId}`);
+    results.NOCODB_TABLE_AUDIT_LOG = existingAuditId;
+  } else {
+    try {
+      console.log('[setup] Creating Audit_Log table...');
+      const id = await createTable(NOCODB_PROJECT, 'Audit_Log', AUDIT_LOG_COLUMNS);
+      results.NOCODB_TABLE_AUDIT_LOG = id;
+      console.log(`[setup] ✓ Audit_Log: ${id}`);
+    } catch (e) {
+      const msg = String(e);
+      errors.push(`Audit_Log table: ${msg.slice(0, 200)}`);
+      console.error('[setup] Error creating Audit_Log table:', msg);
+    }
+  }
+
+  // 9. Create CRM Activities table
   const existingActivitiesId = process.env.NOCODB_TABLE_CRM_ACTIVITIES;
   if (existingActivitiesId) {
     console.log(`[setup] CRM Activities table already exists: ${existingActivitiesId}`);
@@ -295,13 +427,60 @@ export async function POST() {
     }
   }
 
-  // 8. Persist new IDs to .env.local
+  // 9b. Create Alerts_Config table
+  const existingAlertsId = process.env.NOCODB_TABLE_ALERTS_CONFIG;
+  if (existingAlertsId) {
+    console.log(`[setup] Alerts_Config table already exists: ${existingAlertsId}`);
+    results.NOCODB_TABLE_ALERTS_CONFIG = existingAlertsId;
+  } else {
+    try {
+      console.log('[setup] Creating Alerts_Config table...');
+      const id = await createTable(NOCODB_PROJECT, 'Alerts_Config', [
+        { column_name: 'Tenant_Id',  uidt: 'Number' },
+        { column_name: 'Type',       uidt: 'SingleLineText' },
+        { column_name: 'Enabled',    uidt: 'Checkbox' },
+        { column_name: 'Threshold',  uidt: 'Number' },
+        { column_name: 'Channel',    uidt: 'SingleLineText' },
+        { column_name: 'Label',      uidt: 'SingleLineText' },
+      ]);
+      results.NOCODB_TABLE_ALERTS_CONFIG = id;
+      console.log(`[setup] ✓ Alerts_Config: ${id}`);
+    } catch (e) {
+      const msg = String(e);
+      errors.push(`Alerts_Config table: ${msg.slice(0, 200)}`);
+      console.error('[setup] Error creating Alerts_Config table:', msg);
+    }
+  }
+
+  // 9. Persist new IDs to .env.local
   const toSave = Object.fromEntries(
     Object.entries(results).filter(([, v]) => v && !v.startsWith('existing'))
   );
   if (Object.keys(toSave).length > 0) {
     updateEnvLocal(toSave);
   }
+
+  // 10. Create indices for frequently-queried columns
+  console.log('[setup] Creating indices for performance...');
+  const campaignTableId  = process.env.NOCODB_TABLE_METRICS || CAMPAIGN_TABLE_ID;
+  const adsetTableId     = results.NOCODB_TABLE_ADSETS  || process.env.NOCODB_TABLE_ADSETS  || '';
+  const adsTableId       = results.NOCODB_TABLE_ADS     || process.env.NOCODB_TABLE_ADS     || '';
+  const leadsTableId     = results.NOCODB_TABLE_CRM_LEADS || process.env.NOCODB_TABLE_CRM_LEADS || '';
+
+  // Tablas de métricas: consultas frecuentes por Plataforma + Fecha
+  for (const tableId of [campaignTableId, adsetTableId, adsTableId].filter(Boolean)) {
+    await createIndex(tableId, 'Plataforma');
+    await createIndex(tableId, 'Fecha');
+  }
+
+  // Tabla de leads: consultas por campaña + fecha de importación (deduplicación en sync)
+  if (leadsTableId) {
+    await createIndex(leadsTableId, 'ID_Campana');
+    await createIndex(leadsTableId, 'Dia_Import');
+    await createIndex(leadsTableId, 'Estado');
+  }
+
+  console.log('[setup] ✓ Índices creados');
 
   return NextResponse.json({
     success: errors.length === 0,

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { notifyDailySummary, isNotifyConfigured } from '@/lib/notify';
 
 /**
  * Cron endpoint — called by:
@@ -42,6 +43,44 @@ export async function GET(req: NextRequest) {
 
     const data = await res.json();
     console.log('[cron] Sync completed:', data);
+
+    // Send daily summary notification after sync
+    if (isNotifyConfigured()) {
+      const today = new Date().toISOString().split('T')[0];
+      notifyDailySummary({
+        date:            today,
+        platforms:       data.platforms ?? [],
+        totalRecords:    data.synced    ?? 0,
+        crmLeadsCreated: data.crmLeadsCreated ?? 0,
+        errors:          data.error ? [data.error] : [],
+      }).catch(console.warn);
+    }
+
+    // Evaluate alerts after sync (fire-and-forget)
+    fetch(`${baseUrl}/api/alerts/check`, {
+      method:  'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(process.env.CRON_SECRET ? { 'x-cron-secret': process.env.CRON_SECRET } : {}),
+      },
+    })
+      .then((r) => r.json())
+      .then((r) => console.log('[cron] Alerts check:', r))
+      .catch((e) => console.warn('[cron] Alerts check failed:', e));
+
+    // Send weekly report every Monday (fire-and-forget)
+    const reportEmail = process.env.REPORT_EMAIL;
+    if (reportEmail && new Date().getDay() === 1 /* Monday */) {
+      fetch(`${baseUrl}/api/reports`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ period: 'semanal', email: reportEmail, sections: { kpis: true, campaigns: true, crm: true, topCampaigns: true } }),
+      })
+        .then((r) => r.json())
+        .then((r) => console.log('[cron] Weekly report:', r))
+        .catch((e) => console.warn('[cron] Weekly report failed:', e));
+    }
+
     return NextResponse.json({ success: true, result: data, timestamp: new Date().toISOString() });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

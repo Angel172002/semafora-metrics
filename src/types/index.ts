@@ -292,6 +292,8 @@ export interface DashboardData {
   funnelData: FunnelStep[];
   weeklyHeatmap: HeatmapDay[];
   periodComparison: PeriodComparisonItem[];
+  /** Raw filtered campaign metrics — used by AI Insights */
+  dailyMetrics: DailyMetric[];
   lastSync: string | null;
   isMockData: boolean;
 }

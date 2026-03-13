@@ -86,7 +86,7 @@ function getCPRClass(cpr: number, allCPRs: number[]): 'green' | 'yellow' | 'red'
 }
 
 // ─── Sort ─────────────────────────────────────────────────────────────────────
-type SortKey = 'name' | 'impressions' | 'clicks' | 'ctr' | 'results' | 'cost_per_result' | 'cpm' | 'reach' | 'spent';
+type SortKey = 'name' | 'impressions' | 'clicks' | 'ctr' | 'results' | 'cost_per_result' | 'cpm' | 'reach' | 'spent' | 'budget';
 type SortDir = 'asc' | 'desc';
 
 function SortIcon({ active, dir }: { active: boolean; dir: SortDir }) {
@@ -116,11 +116,6 @@ export default function CampaignsTable({ data, loading }: Props) {
 
   // ── Derived data ────────────────────────────────────────────────────────────
   const totalSpent = data.reduce((s, r) => s + r.spent, 0);
-  const totalImpressions = data.reduce((s, r) => s + r.impressions, 0);
-  const totalClicks = data.reduce((s, r) => s + r.clicks, 0);
-  const totalResults = data.reduce((s, r) => s + r.results, 0);
-  const totalReach = data.reduce((s, r) => s + r.reach, 0);
-  const avgCTR = totalImpressions > 0 ? (totalClicks / totalImpressions) * 100 : 0;
   const allCPRs = data.map((r) => r.cost_per_result);
 
   const filterCounts: Record<string, number> = { all: data.length };
@@ -248,12 +243,14 @@ export default function CampaignsTable({ data, loading }: Props) {
               {th('Clics', 'clicks')}
               {th('CTR', 'ctr')}
               {th('Resultados', 'results')}
-              <th className="text-right">Tipo</th>
+              <th className="text-right">Conversión</th>
               {th('CPR', 'cost_per_result')}
               {th('CPM', 'cpm')}
               {th('Alcance', 'reach')}
               <th className="text-right">Participación</th>
               {th('Invertido', 'spent')}
+              {th('Presupuesto', 'budget')}
+              <th className="text-right">% Ejec.</th>
             </tr>
           </thead>
           <tbody>
@@ -360,46 +357,52 @@ export default function CampaignsTable({ data, loading }: Props) {
                   <td className="text-right font-mono text-xs font-bold" style={{ color: 'var(--text)' }}>
                     {formatCOPFull(row.spent)}
                   </td>
+
+                  {/* Presupuesto */}
+                  {(() => {
+                    const hasBudget = (row.budget ?? 0) > 0;
+                    const execPct   = hasBudget ? Math.min(100, Math.round((row.spent / row.budget!) * 100)) : 0;
+                    const barColor  = execPct >= 90 ? '#f87171' : execPct >= 70 ? '#fbbf24' : '#4ade80';
+                    return (
+                      <>
+                        <td className="text-right font-mono text-xs" style={{ color: hasBudget ? 'var(--muted)' : 'var(--muted2)', whiteSpace: 'nowrap' }}>
+                          {hasBudget ? (
+                            <>
+                              {formatCOPFull(row.budget!)}
+                              <span className="ml-1 text-[10px]" style={{ color: 'var(--muted2)' }}>
+                                {row.budget_type === 'daily' ? '/día' : row.budget_type === 'lifetime' ? 'total' : ''}
+                              </span>
+                            </>
+                          ) : '—'}
+                        </td>
+                        <td className="text-right" style={{ minWidth: 80 }}>
+                          {hasBudget ? (
+                            <div className="flex flex-col items-end gap-1">
+                              <span className="font-mono text-xs font-semibold" style={{ color: barColor }}>
+                                {execPct}%
+                              </span>
+                              <div className="progress-bar" style={{ width: 60 }}>
+                                <div className="progress-fill" style={{ width: `${execPct}%`, background: barColor }} />
+                              </div>
+                            </div>
+                          ) : <span style={{ color: 'var(--muted2)', fontSize: 12 }}>—</span>}
+                        </td>
+                      </>
+                    );
+                  })()}
                 </tr>
               );
             })}
 
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={13} className="text-center py-10" style={{ color: 'var(--muted)' }}>
+                <td colSpan={15} className="text-center py-10" style={{ color: 'var(--muted)' }}>
                   No hay campañas para este filtro
                 </td>
               </tr>
             )}
           </tbody>
 
-          {/* Totals footer */}
-          {filtered.length > 1 && (
-            <tfoot>
-              <tr>
-                <td colSpan={3} style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                  Totales ({filtered.length} campañas)
-                </td>
-                <td className="text-right font-mono" style={{ color: 'var(--text-soft)', fontSize: 12 }}>
-                  {fmt(totalImpressions)}
-                </td>
-                <td className="text-right font-mono" style={{ color: 'var(--info)', fontSize: 12 }}>
-                  {fmt(totalClicks)}
-                </td>
-                <td className="text-right font-mono font-semibold" style={{ color: '#60a5fa', fontSize: 12 }}>
-                  {avgCTR.toFixed(2)}%
-                </td>
-                <td className="text-right font-mono font-bold" style={{ color: '#4ade80', fontSize: 12 }}>
-                  {fmt(totalResults)}
-                </td>
-                <td colSpan={4} />
-                <td className="text-right" style={{ fontSize: 11, color: 'var(--muted2)' }}>100%</td>
-                <td className="text-right font-mono font-bold" style={{ color: 'var(--text)', fontSize: 13 }}>
-                  {formatCOPFull(totalSpent)}
-                </td>
-              </tr>
-            </tfoot>
-          )}
         </table>
       </div>
     </div>

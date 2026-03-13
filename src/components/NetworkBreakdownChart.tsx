@@ -129,36 +129,58 @@ export default function NetworkBreakdownChart({ data, loading }: Props) {
 
         {/* Stats cards */}
         <div className="flex flex-col justify-center gap-3">
-          {data.map((item) => (
-            <div
-              key={item.network}
-              className="rounded-lg p-3 flex justify-between items-center"
-              style={{ background: 'var(--surface2)' }}
-            >
-              <div className="flex items-center gap-2">
-                <span
-                  className="w-3 h-3 rounded-full flex-shrink-0"
-                  style={{ background: item.color }}
-                />
-                <div>
-                  <p className="text-xs font-semibold" style={{ color: 'var(--text)' }}>
-                    {item.label}
-                  </p>
-                  <p className="text-xs" style={{ color: 'var(--muted)' }}>
-                    {item.percentage}% del total
-                  </p>
+          {data.map((item) => {
+            const cpr = item.results > 0 ? Math.round(item.spent / item.results) : 0;
+            return (
+              <div
+                key={item.network}
+                className="rounded-lg p-3"
+                style={{ background: 'var(--surface2)', border: `1px solid ${item.color}22` }}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="w-3 h-3 rounded-full flex-shrink-0"
+                      style={{ background: item.color }}
+                    />
+                    <p className="text-xs font-bold" style={{ color: 'var(--text)' }}>
+                      {item.label}
+                    </p>
+                  </div>
+                  <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full"
+                    style={{ background: `${item.color}18`, color: item.color }}>
+                    {item.percentage}%
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+                  <div>
+                    <p className="text-[9px] uppercase tracking-wide" style={{ color: 'var(--muted)' }}>Resultados</p>
+                    <p className="text-xs font-bold font-mono" style={{ color: item.color }}>
+                      {item.results.toLocaleString('es-CO')}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[9px] uppercase tracking-wide" style={{ color: 'var(--muted)' }}>Invertido</p>
+                    <p className="text-xs font-bold font-mono" style={{ color: 'var(--text)' }}>
+                      {formatCOPFull(item.spent)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[9px] uppercase tracking-wide" style={{ color: 'var(--muted)' }}>CPR</p>
+                    <p className="text-xs font-semibold font-mono" style={{ color: cpr > 0 ? '#fbbf24' : 'var(--muted2)' }}>
+                      {cpr > 0 ? formatCOPFull(cpr) : '—'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[9px] uppercase tracking-wide" style={{ color: 'var(--muted)' }}>Impresiones</p>
+                    <p className="text-xs font-mono" style={{ color: 'var(--muted)' }}>
+                      {formatNum(item.impressions)}
+                    </p>
+                  </div>
                 </div>
               </div>
-              <div className="text-right">
-                <p className="text-xs font-bold font-mono" style={{ color: item.color }}>
-                  {item.results.toLocaleString('es-CO')} res.
-                </p>
-                <p className="text-xs font-mono" style={{ color: 'var(--muted)' }}>
-                  {formatNum(item.impressions)} imp.
-                </p>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>

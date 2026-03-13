@@ -1,11 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { fetchAllMetaAccounts, isMetaConfigured } from '@/lib/integrations/meta';
 import { fetchAllGoogleAccounts, isGoogleConfigured } from '@/lib/integrations/google';
-import { fetchTikTokMetrics, isTikTokConfigured } from '@/lib/integrations/tiktok';
+import { fetchTikTokMetrics, fetchTikTokAdSetMetrics, fetchTikTokAdMetrics, isTikTokConfigured } from '@/lib/integrations/tiktok';
 import { bulkInsert, insertRow, listAllRows, clearRowsByDateRange } from '@/lib/nocodb';
 import { notifyNewLeads, type LeadNotification } from '@/lib/notify';
 import type { DailyMetric, AdSetMetric, AdMetric, SyncResponse, Platform } from '@/types';
 import { LEAD_RESULT_TYPES } from '@/lib/constants';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimit';
+import { validate, SyncRequestSchema } from '@/lib/validators';
+import { audit } from '@/lib/audit';
+import { cacheInvalidatePrefix, CacheKeys } from '@/lib/cache';
+import { getTenantId, requireAuth } from '@/lib/apiAuth';
 
 const NOCODB_PROJECT    = process.env.NOCODB_PROJECT_ID        || '';
 const TABLE_CAMPAIGNS   = process.env.NOCODB_TABLE_METRICS     || '';
@@ -22,14 +27,27 @@ const TABLE_CRM_STAGES  = process.env.NOCODB_TABLE_CRM_STAGES  || '';
  * This is idempotent: running multiple times the same day won't duplicate leads.
  * Returns the list of created lead notifications for downstream alerting.
  */
+
+// In-memory lock — prevents concurrent syncs from creating duplicate CRM leads
+let crmImportRunning = false;
+
 async function importMetaLeadsToCRM(campaigns: DailyMetric[]): Promise<LeadNotification[]> {
+  if (crmImportRunning) {
+    console.warn('[sync] CRM import already in progress — skipping to prevent duplicates');
+    return [];
+  }
   if (!TABLE_CRM_LEADS) return [];
+
+  crmImportRunning = true;
 
   // Only lead-type results with at least 1 result
   const leadMetrics = campaigns.filter(
     (m) => LEAD_RESULT_TYPES.has(m.result_type) && m.results > 0
   );
-  if (leadMetrics.length === 0) return [];
+  if (leadMetrics.length === 0) {
+    crmImportRunning = false;
+    return [];
+  }
 
   // Process ALL dates (idempotent: we check existing CRM leads per campaign per day)
   const dayMetrics = leadMetrics;
@@ -47,70 +65,74 @@ async function importMetaLeadsToCRM(campaigns: DailyMetric[]): Promise<LeadNotif
 
   const created: LeadNotification[] = [];
 
-  for (const metric of dayMetrics) {
-    try {
-      // How many CRM leads already exist for this campaign on this date?
-      // Uses Dia_Import (SingleLineText YYYY-MM-DD) — avoids NocoDB datetime range limitations
-      const existing = await listAllRows<{ Id: number }>(NOCODB_PROJECT, TABLE_CRM_LEADS, {
-        fields: 'Id',
-        where:  `(ID_Campana,eq,${metric.campaign_id})~and(Plataforma_Origen,eq,Meta)~and(Dia_Import,eq,${metric.date})`,
-      });
-
-      const toCreate = Math.max(0, metric.results - existing.length);
-      if (toCreate === 0) continue;
-
-      // NocoDB DateTime fields require "YYYY-MM-DD HH:MM:SS" format (no Z, no ms)
-      const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
-      const cpl = metric.results > 0 ? Math.round(metric.spent / metric.results) : 0;
-      const note = [
-        `Importado automáticamente desde Meta Ads el ${metric.date}.`,
-        cpl > 0 ? `Costo por lead: $${cpl.toLocaleString('es-CO')} COP.` : '',
-        `Campaña: ${metric.campaign_name}.`,
-        `Actualiza nombre y teléfono cuando contactes al lead en WhatsApp.`,
-      ].filter(Boolean).join(' ');
-
-      for (let i = 0; i < toCreate; i++) {
-        const row = await insertRow(NOCODB_PROJECT, TABLE_CRM_LEADS, {
-          Nombre:                `Lead WA · ${metric.campaign_name}`,
-          Telefono:              '',
-          Email:                 '',
-          Empresa:               '',
-          Origen:                'Meta Ads',
-          ID_Campana:            metric.campaign_id,
-          Nombre_Campana:        metric.campaign_name,
-          Plataforma_Origen:     'Meta',
-          Dia_Import:            metric.date,
-          Valor_Estimado:        0,
-          Stage_Id:              firstStage.Id,
-          Stage_Nombre:          firstStage.Nombre,
-          Stage_Color:           firstStage.Color,
-          Usuario_Id:            1,
-          Usuario_Nombre:        'Sin asignar',
-          Fecha_Creacion:        now,
-          Fecha_Ultimo_Contacto: now,
-          Proxima_Accion_Fecha:  null,
-          Estado:                'abierto',
-          Motivo_Perdida:        '',
-          Notas:                 note,
-          Fecha_Cierre:          null,
-        }) as { Id?: number } | void;
-
-        created.push({
-          leadId:       (row as { Id?: number })?.Id ?? 0,
-          nombre:       `Lead WA · ${metric.campaign_name}`,
-          campaña:      metric.campaign_name,
-          plataforma:   'Meta',
-          stageName:    firstStage.Nombre,
-          cpl,
-          fecha:        now,
-          totalCreated: toCreate,
+  try {
+    for (const metric of dayMetrics) {
+      try {
+        // How many CRM leads already exist for this campaign on this date?
+        // Uses Dia_Import (SingleLineText YYYY-MM-DD) — avoids NocoDB datetime range limitations
+        const existing = await listAllRows<{ Id: number }>(NOCODB_PROJECT, TABLE_CRM_LEADS, {
+          fields: 'Id',
+          where:  `(ID_Campana,eq,${metric.campaign_id})~and(Plataforma_Origen,eq,Meta)~and(Dia_Import,eq,${metric.date})`,
         });
-      }
 
-      console.log(`[sync] CRM: ${toCreate} lead(s) created for campaign "${metric.campaign_name}" (${metric.date})`);
-    } catch (e) {
-      console.warn(`[sync] CRM import failed for campaign ${metric.campaign_id}:`, e);
+        const toCreate = Math.max(0, metric.results - existing.length);
+        if (toCreate === 0) continue;
+
+        // NocoDB DateTime fields require "YYYY-MM-DD HH:MM:SS" format (no Z, no ms)
+        const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+        const cpl = metric.results > 0 ? Math.round(metric.spent / metric.results) : 0;
+        const note = [
+          `Importado automáticamente desde Meta Ads el ${metric.date}.`,
+          cpl > 0 ? `Costo por lead: $${cpl.toLocaleString('es-CO')} COP.` : '',
+          `Campaña: ${metric.campaign_name}.`,
+          `Actualiza nombre y teléfono cuando contactes al lead en WhatsApp.`,
+        ].filter(Boolean).join(' ');
+
+        for (let i = 0; i < toCreate; i++) {
+          const row = await insertRow(NOCODB_PROJECT, TABLE_CRM_LEADS, {
+            Nombre:                `Lead WA · ${metric.campaign_name}`,
+            Telefono:              '',
+            Email:                 '',
+            Empresa:               '',
+            Origen:                'Meta Ads',
+            ID_Campana:            metric.campaign_id,
+            Nombre_Campana:        metric.campaign_name,
+            Plataforma_Origen:     'Meta',
+            Dia_Import:            metric.date,
+            Valor_Estimado:        0,
+            Stage_Id:              firstStage.Id,
+            Stage_Nombre:          firstStage.Nombre,
+            Stage_Color:           firstStage.Color,
+            Usuario_Id:            1,
+            Usuario_Nombre:        'Sin asignar',
+            Fecha_Creacion:        now,
+            Fecha_Ultimo_Contacto: now,
+            Proxima_Accion_Fecha:  null,
+            Estado:                'abierto',
+            Motivo_Perdida:        '',
+            Notas:                 note,
+            Fecha_Cierre:          null,
+          }) as { Id?: number } | void;
+
+          created.push({
+            leadId:       (row as { Id?: number })?.Id ?? 0,
+            nombre:       `Lead WA · ${metric.campaign_name}`,
+            campaña:      metric.campaign_name,
+            plataforma:   'Meta',
+            stageName:    firstStage.Nombre,
+            cpl,
+            fecha:        now,
+            totalCreated: toCreate,
+          });
+        }
+
+        console.log(`[sync] CRM: ${toCreate} lead(s) created for campaign "${metric.campaign_name}" (${metric.date})`);
+      } catch (e) {
+        console.warn(`[sync] CRM import failed for campaign ${metric.campaign_id}:`, e);
+      }
     }
+  } finally {
+    crmImportRunning = false;
   }
 
   return created;
@@ -133,12 +155,12 @@ function toCampaignRow(m: DailyMetric) {
     'Compartidos':          m.shares,
     'Comentarios':          m.comments,
     'Reproducciones Video': m.video_plays,
-    'Gastado':              m.spent,
+    'Gastado':              Math.round(m.spent),
     'Alcance':              m.reach,
-    'Frecuencia':           m.frequency,
-    'CPM':                  m.cpm,
-    'CPC':                  m.cpc,
-    'Costo Por Resultado':  m.cost_per_result,
+    'Frecuencia':           Math.round(m.frequency),
+    'CPM':                  Math.round(m.cpm),
+    'CPC':                  Math.round(m.cpc),
+    'Costo Por Resultado':  Math.round(m.cost_per_result),
   };
 }
 
@@ -155,12 +177,12 @@ function toAdSetRow(m: AdSetMetric) {
     'Clics':                m.clicks,
     'Resultados':           m.results,
     'Tipo Resultado':       m.result_type,
-    'Gastado':              m.spent,
+    'Gastado':              Math.round(m.spent),
     'Alcance':              m.reach,
-    'Frecuencia':           m.frequency,
-    'CPM':                  m.cpm,
-    'CPC':                  m.cpc,
-    'Costo Por Resultado':  m.cost_per_result,
+    'Frecuencia':           Math.round(m.frequency),
+    'CPM':                  Math.round(m.cpm),
+    'CPC':                  Math.round(m.cpc),
+    'Costo Por Resultado':  Math.round(m.cost_per_result),
     'Me Gusta':             m.likes,
     'Comentarios':          m.comments,
     'Compartidos':          m.shares,
@@ -183,12 +205,12 @@ function toAdRow(m: AdMetric) {
     'Clics':                m.clicks,
     'Resultados':           m.results,
     'Tipo Resultado':       m.result_type,
-    'Gastado':              m.spent,
+    'Gastado':              Math.round(m.spent),
     'Alcance':              m.reach,
-    'Frecuencia':           m.frequency,
-    'CPM':                  m.cpm,
-    'CPC':                  m.cpc,
-    'Costo Por Resultado':  m.cost_per_result,
+    'Frecuencia':           Math.round(m.frequency),
+    'CPM':                  Math.round(m.cpm),
+    'CPC':                  Math.round(m.cpc),
+    'Costo Por Resultado':  Math.round(m.cost_per_result),
     'Me Gusta':             m.likes,
     'Comentarios':          m.comments,
     'Compartidos':          m.shares,
@@ -232,6 +254,24 @@ function getDateRange(body: {
 
 // ─── POST /api/sync ────────────────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
+  // Rate limit: 5 syncs per 10 minutes per IP
+  const ip       = getClientIp(req);
+  const tenantId = getTenantId(req);
+  const session  = requireAuth(req);
+  const rl = checkRateLimit(`sync:${ip}`, 5, 10 * 60 * 1000);
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { success: false, error: 'Demasiadas solicitudes. Espera antes de sincronizar de nuevo.' },
+      {
+        status: 429,
+        headers: {
+          'Retry-After': String(Math.ceil((rl.resetAt - Date.now()) / 1000)),
+          'X-RateLimit-Remaining': '0',
+        },
+      }
+    );
+  }
+
   if (!NOCODB_PROJECT || !TABLE_CAMPAIGNS) {
     return NextResponse.json(
       { success: false, error: 'NocoDB no configurado. Revisa NOCODB_PROJECT_ID y NOCODB_TABLE_METRICS.' },
@@ -239,10 +279,25 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const body = await req.json().catch(() => ({}));
-  const platforms: (Platform | 'all')[] = body.platforms || ['meta', 'google', 'tiktok'];
+  const raw    = await req.json().catch(() => ({}));
+  const parsed = validate(SyncRequestSchema, raw);
+  if (!parsed.success) {
+    return NextResponse.json({ success: false, error: parsed.error }, { status: 400 });
+  }
+
+  const body      = parsed.data;
+  const platforms: (Platform | 'all')[] = body.platforms as (Platform | 'all')[];
   const dateRange = getDateRange(body);
-  const clearFirst: boolean = body.clearFirst === true;
+  const clearFirst: boolean = body.clearFirst;
+
+  audit({
+    tenantId,
+    userId:    session?.sub   ?? 0,
+    userEmail: session?.email ?? '',
+    action:    'sync.start',
+    ip,
+    metadata:  { platforms, dateRange },
+  });
 
   console.log(`[sync] ══ Starting sync: ${dateRange.since} → ${dateRange.until} ══`);
   console.log(`[sync] Platforms: ${platforms.join(', ')} | clearFirst: ${clearFirst}`);
@@ -351,21 +406,31 @@ export async function POST(req: NextRequest) {
         if (TABLE_ADSETS) await clearRowsByDateRange(NOCODB_PROJECT, TABLE_ADSETS, 'tiktok', dateRange.since, dateRange.until).catch(console.warn);
         if (TABLE_ADS)    await clearRowsByDateRange(NOCODB_PROJECT, TABLE_ADS,    'tiktok', dateRange.since, dateRange.until).catch(console.warn);
 
-        const metrics = await fetchTikTokMetrics(
-          process.env.TIKTOK_ACCESS_TOKEN!,
-          process.env.TIKTOK_ADVERTISER_ID!,
-          dateRange
-        );
-        if (metrics.length > 0) {
-          await bulkInsert(
-            NOCODB_PROJECT,
-            TABLE_CAMPAIGNS,
-            metrics.map(toCampaignRow)
-          );
-          totalRecords += metrics.length;
+        const token = process.env.TIKTOK_ACCESS_TOKEN!;
+        const advId = process.env.TIKTOK_ADVERTISER_ID!;
+
+        const [ttCampaigns, ttAdSets, ttAds] = await Promise.all([
+          fetchTikTokMetrics(token, advId, dateRange),
+          TABLE_ADSETS ? fetchTikTokAdSetMetrics(token, advId, dateRange) : Promise.resolve([]),
+          TABLE_ADS    ? fetchTikTokAdMetrics(token, advId, dateRange)    : Promise.resolve([]),
+        ]);
+
+        if (ttCampaigns.length > 0) {
+          await bulkInsert(NOCODB_PROJECT, TABLE_CAMPAIGNS, ttCampaigns.map(toCampaignRow));
+          totalRecords += ttCampaigns.length;
         }
-        await logSync('tiktok', 'exitoso', metrics.length);
+        if (ttAdSets.length > 0 && TABLE_ADSETS) {
+          await bulkInsert(NOCODB_PROJECT, TABLE_ADSETS, ttAdSets.map(toAdSetRow));
+          totalRecords += ttAdSets.length;
+        }
+        if (ttAds.length > 0 && TABLE_ADS) {
+          await bulkInsert(NOCODB_PROJECT, TABLE_ADS, ttAds.map(toAdRow));
+          totalRecords += ttAds.length;
+        }
+
+        await logSync('tiktok', 'exitoso', ttCampaigns.length + ttAdSets.length + ttAds.length);
         syncedPlatforms.push('tiktok');
+        console.log(`[sync] ✓ TikTok: campaigns=${ttCampaigns.length}, adSets=${ttAdSets.length}, ads=${ttAds.length}`);
 
       } else {
         console.log(`[sync] Skipping ${platform} — not configured`);
@@ -378,8 +443,25 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  const success = errors.length === 0;
+
+  audit({
+    tenantId,
+    userId:    session?.sub   ?? 0,
+    userEmail: session?.email ?? '',
+    action:    success ? 'sync.complete' : 'sync.error',
+    ip,
+    metadata:  { platforms: syncedPlatforms, totalRecords, totalCrmLeads, errors },
+  });
+
+  // Invalidate dashboard + CRM stats cache so next request fetches fresh data
+  if (success && syncedPlatforms.length > 0) {
+    cacheInvalidatePrefix(`metrics:t${tenantId}:`);
+    cacheInvalidatePrefix(`crm_stats:t${tenantId}`);
+  }
+
   const response: SyncResponse & { crmLeadsCreated?: number } = {
-    success:         errors.length === 0,
+    success,
     synced:          totalRecords,
     platforms:       syncedPlatforms,
     crmLeadsCreated: totalCrmLeads > 0 ? totalCrmLeads : undefined,

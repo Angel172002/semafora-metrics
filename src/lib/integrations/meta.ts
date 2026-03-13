@@ -27,7 +27,8 @@ const PRIMARY_RESULT_TYPES = [
   'lead',
   'complete_registration',
   // Follower campaigns
-  'like',                  // Page likes
+  'page_like',             // Facebook page likes (dedicated Page Likes campaign objective)
+  'like',                  // Generic like action
   'follow',                // Instagram follows
   'onsite_conversion.subscribe',
   // Video view campaigns
@@ -229,7 +230,7 @@ async function fetchCampaignMetrics(
       results,
       conversions: results,
       result_type,
-      likes: getAction(row.actions, 'post_reaction', 'like'),
+      likes: getAction(row.actions, 'page_like', 'follow', 'post_reaction', 'like'),
       shares: getAction(row.actions, 'post'),
       comments: getAction(row.actions, 'comment'),
       video_plays: getVideoPlays(row),
@@ -300,7 +301,7 @@ async function fetchAdSetMetrics(
       cpm: parseFloat(row.cpm || '0') || 0,
       cpc: parseFloat(row.cpc || '0') || 0,
       cost_per_result: results > 0 ? parseFloat((spent / results).toFixed(2)) : 0,
-      likes: getAction(row.actions, 'post_reaction', 'like'),
+      likes: getAction(row.actions, 'page_like', 'follow', 'post_reaction', 'like'),
       comments: getAction(row.actions, 'comment'),
       shares: getAction(row.actions, 'post'),
       video_plays: getVideoPlays(row),
@@ -369,7 +370,7 @@ async function fetchAdLevelMetrics(
       cpm: parseFloat(row.cpm || '0') || 0,
       cpc: parseFloat(row.cpc || '0') || 0,
       cost_per_result: results > 0 ? parseFloat((spent / results).toFixed(2)) : 0,
-      likes: getAction(row.actions, 'post_reaction', 'like'),
+      likes: getAction(row.actions, 'page_like', 'follow', 'post_reaction', 'like'),
       comments: getAction(row.actions, 'comment'),
       shares: getAction(row.actions, 'post'),
       video_plays: getVideoPlays(row),

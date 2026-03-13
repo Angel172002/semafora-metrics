@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getMockDashboardData } from '@/lib/mockData';
 import { transformToDashboard } from '@/lib/dataTransform';
 import { listAllRows, checkNocoDBConnection } from '@/lib/nocodb';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimit';
+import { getProjectId, getTenantId } from '@/lib/apiAuth';
+import { cacheGet, cacheSet, CacheKeys, CacheTTL } from '@/lib/cache';
 import type {
   DailyMetric,
   AdSetMetric,
@@ -11,7 +14,6 @@ import type {
   Platform,
 } from '@/types';
 
-const NOCODB_PROJECT  = process.env.NOCODB_PROJECT_ID     || '';
 const TABLE_CAMPAIGNS = process.env.NOCODB_TABLE_METRICS  || '';
 const TABLE_ADSETS    = process.env.NOCODB_TABLE_ADSETS   || '';
 const TABLE_ADS       = process.env.NOCODB_TABLE_ADS      || '';
@@ -110,7 +112,7 @@ function mapAdSet(row: NocoAdSetRow): AdSetMetric {
     adset_name:       row['Nombre Conjunto'] || '',
     campaign_id:      String(row['ID Campana'] || ''),
     campaign_name:    row['Nombre Campana'] || '',
-    platform:         'meta',
+    platform:         (row['Plataforma'] as Platform) || 'meta',
     network:          row['Red'] || 'all',
     date:             row['Fecha'] || '',
     impressions:      row['Impresiones'] || 0,
@@ -139,7 +141,7 @@ function mapAd(row: NocoAdRow): AdMetric {
     adset_name:       row['Nombre Conjunto'] || '',
     campaign_id:      String(row['ID Campana'] || ''),
     campaign_name:    row['Nombre Campana'] || '',
-    platform:         'meta',
+    platform:         (row['Plataforma'] as Platform) || 'meta',
     network:          row['Red'] || 'all',
     date:             row['Fecha'] || '',
     impressions:      row['Impresiones'] || 0,
@@ -161,6 +163,25 @@ function mapAd(row: NocoAdRow): AdMetric {
 
 // ─── GET /api/metrics ─────────────────────────────────────────────────────────
 export async function GET(req: NextRequest) {
+  // Rate limit: 60 requests per minute per IP
+  const ip = getClientIp(req);
+  const rl = checkRateLimit(`metrics:${ip}`, 60, 60 * 1000);
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { success: false, error: 'Demasiadas solicitudes. Espera un momento.' },
+      {
+        status: 429,
+        headers: {
+          'Retry-After': String(Math.ceil((rl.resetAt - Date.now()) / 1000)),
+          'X-RateLimit-Remaining': '0',
+        },
+      }
+    );
+  }
+
+  const NOCODB_PROJECT = getProjectId(req);
+  const tenantId       = getTenantId(req);
+
   const { searchParams } = req.nextUrl;
   const range = (searchParams.get('range') || '7d') as DateRange;
   const useMock = process.env.USE_MOCK_DATA === 'true';
@@ -171,6 +192,13 @@ export async function GET(req: NextRequest) {
     if (useMock) {
       const data = getMockDashboardData(mockRange);
       return NextResponse.json<MetricsResponse>({ success: true, data });
+    }
+
+    // ── Cache check ────────────────────────────────────────────────────────
+    const cacheKey = CacheKeys.metrics(tenantId, range);
+    const cached   = await cacheGet<MetricsResponse>(cacheKey);
+    if (cached) {
+      return NextResponse.json(cached, { headers: { 'X-Cache': 'HIT' } });
     }
 
     // ── Check NocoDB connection ─────────────────────────────────────────────
@@ -212,8 +240,13 @@ export async function GET(req: NextRequest) {
       lastSync = exitosos[0]?.['Fecha Sync'] || null;
     } catch { /* sync log may be empty */ }
 
-    const data = transformToDashboard(campaigns, adSets, ads, range, lastSync);
-    return NextResponse.json<MetricsResponse>({ success: true, data });
+    const data     = transformToDashboard(campaigns, adSets, ads, range, lastSync);
+    const response = { success: true, data } as MetricsResponse;
+
+    // ── Cache result ───────────────────────────────────────────────────────
+    await cacheSet(cacheKey, response, CacheTTL.METRICS);
+
+    return NextResponse.json(response, { headers: { 'X-Cache': 'MISS' } });
 
   } catch (error) {
     console.error('[/api/metrics] Error:', error);

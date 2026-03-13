@@ -43,4 +43,5 @@ export const FOLLOWER_RESULT_TYPES = new Set([
   'like',
   'follow',
   'page_like',
+  'onsite_conversion.subscribe',
 ]);

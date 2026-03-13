@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import type { CrmLead, CrmActivity, CrmStage } from '@/types';
 import { formatCOP } from '@/lib/format';
 import ActivityModal from '@/components/crm/ActivityModal';
+import LeadScoreCard from '@/components/crm/LeadScoreCard';
 import { useToast } from '@/components/Toast';
 import { ASESORES, LEAD_ORIGINS, ACTIVITY_ICONS, COLOMBIA_CITIES, ORIGIN_COLOR } from '@/lib/crmConstants';
 
@@ -253,6 +254,9 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
 
       {/* ── Body ── */}
       <div className="flex-1 p-4 md:p-6 max-w-5xl mx-auto w-full flex flex-col gap-5">
+
+        {/* ── Lead Score ── */}
+        <LeadScoreCard leadId={lead.Id} />
 
         {/* ── KPIs rápidos ── */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">

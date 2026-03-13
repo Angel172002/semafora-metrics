@@ -5,8 +5,12 @@ import { useMetrics } from '@/hooks/useMetrics';
 import FollowerTable from '@/components/FollowerTable';
 import KpiCard from '@/components/KpiCard';
 import type { DateRange } from '@/types';
-import { formatCOP } from '@/lib/format';
+import { formatCOP, formatCOPFull } from '@/lib/format';
 import { useTheme } from '@/hooks/useTheme';
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
+  ResponsiveContainer, Cell,
+} from 'recharts';
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
 const FollowerIcon = () => (
@@ -58,8 +62,29 @@ const RANGE_LABELS: Record<DateRange, string> = {
   'all': 'Todo el historial',
 };
 
+// Colores por posición en ranking
+const BAR_COLORS = ['#ec4899', '#f472b6', '#f9a8d4', '#fbcfe8', '#fce7f3', '#fdf2f8'];
+
+function FollowerTooltip({ active, payload, label }: any) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="custom-tooltip text-xs">
+      <p className="font-semibold mb-1" style={{ color: 'var(--text)' }}>{label}</p>
+      {payload.map((p: any) => (
+        <div key={p.dataKey} className="flex justify-between gap-3">
+          <span style={{ color: p.fill }}>{p.name}</span>
+          <span className="font-mono font-bold" style={{ color: p.fill }}>
+            {p.dataKey === 'cpf' ? formatCOPFull(p.value) : p.value.toLocaleString('es-CO')}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function SeguidoresPage() {
   const [range, setRange] = useState<DateRange>('7d');
+  const [activeChart, setActiveChart] = useState<'followers' | 'cpf'>('followers');
   const { data, loading, syncing, triggerSync } = useMetrics(range);
   const { isDark, toggle } = useTheme();
 
@@ -68,6 +93,16 @@ export default function SeguidoresPage() {
   const totalSpent      = table.reduce((s, r) => s + r.spent, 0);
   const totalReach      = table.reduce((s, r) => s + r.reach, 0);
   const avgCPF          = totalFollowers > 0 ? totalSpent / totalFollowers : 0;
+
+  // Chart data
+  const chartData = [...table]
+    .sort((a, b) => b.followers_gained - a.followers_gained)
+    .slice(0, 6)
+    .map((r) => ({
+      name: r.name.length > 22 ? r.name.substring(0, 20) + '…' : r.name,
+      followers: r.followers_gained,
+      cpf: r.cost_per_follower,
+    }));
 
   return (
     <div className="min-h-screen flex flex-col" style={{ background: 'var(--bg)' }}>
@@ -181,10 +216,72 @@ export default function SeguidoresPage() {
               loading={loading}
             />
           </div>
-          <p className="text-xs mt-2 px-0.5" style={{ color: 'var(--muted)' }}>
-            💡 Solo campañas con objetivo &quot;Me Gusta&quot; o &quot;Seguidor&quot; · Invertido = Importe Gastado de Meta en COP
-          </p>
         </div>
+
+        {/* ── Chart ── */}
+        {!loading && chartData.length > 0 && (
+          <div className="card p-5">
+            <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+              <div>
+                <h3 className="font-semibold text-sm" style={{ color: 'var(--text)' }}>
+                  {activeChart === 'followers' ? 'Seguidores por Campaña' : 'Costo por Seguidor (CPF)'}
+                </h3>
+                <p className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>
+                  {activeChart === 'followers'
+                    ? 'Seguidores/likes ganados por campaña'
+                    : 'Menor CPF = mejor rendimiento'}
+                </p>
+              </div>
+              {/* Toggle */}
+              <div className="flex items-center gap-1 p-0.5 rounded-lg" style={{ background: 'var(--surface2)' }}>
+                {(['followers', 'cpf'] as const).map((k) => (
+                  <button
+                    key={k}
+                    onClick={() => setActiveChart(k)}
+                    className="text-xs px-3 py-1.5 rounded-md font-semibold transition-all"
+                    style={{
+                      background: activeChart === k ? 'var(--surface3)' : 'transparent',
+                      color: activeChart === k ? 'var(--text)' : 'var(--muted)',
+                    }}
+                  >
+                    {k === 'followers' ? 'Seguidores' : 'CPF'}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={chartData} margin={{ top: 0, right: 0, bottom: 0, left: 0 }} barSize={28}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                <XAxis
+                  dataKey="name"
+                  tick={{ fill: 'var(--muted)', fontSize: 10 }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <YAxis
+                  tick={{ fill: 'var(--muted)', fontSize: 10 }}
+                  axisLine={false}
+                  tickLine={false}
+                  tickFormatter={(v) => activeChart === 'cpf'
+                    ? (v >= 1000 ? `${Math.round(v / 1000)}K` : v)
+                    : v.toLocaleString('es-CO')}
+                  width={42}
+                />
+                <Tooltip content={<FollowerTooltip />} />
+                <Bar
+                  dataKey={activeChart === 'followers' ? 'followers' : 'cpf'}
+                  name={activeChart === 'followers' ? 'Seguidores' : 'CPF'}
+                  radius={[4, 4, 0, 0]}
+                >
+                  {chartData.map((_, i) => (
+                    <Cell key={i} fill={BAR_COLORS[i % BAR_COLORS.length]} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        )}
 
         {/* ── Follower table ── */}
         <FollowerTable data={table} loading={loading} />

@@ -1,13 +1,24 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { listAllRows } from '@/lib/nocodb';
-import type { CrmLead, CrmStats } from '@/types';
+import { getProjectId, getTenantId } from '@/lib/apiAuth';
+import { cacheGet, cacheSet, CacheKeys, CacheTTL } from '@/lib/cache';
+import type { CrmLead, CrmStats, AsesorStats, StageStats } from '@/types';
 
-const PROJECT = process.env.NOCODB_PROJECT_ID      || '';
-const TABLE   = process.env.NOCODB_TABLE_CRM_LEADS || '';
+const TABLE = process.env.NOCODB_TABLE_CRM_LEADS || '';
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const PROJECT  = getProjectId(req);
+  const tenantId = getTenantId(req);
+
   if (!TABLE) {
     return NextResponse.json({ success: false, data: null, error: 'CRM Leads table not configured.' }, { status: 503 });
+  }
+
+  // ── Cache check ──────────────────────────────────────────────────────────
+  const cacheKey = CacheKeys.crmStats(tenantId);
+  const cached   = await cacheGet<{ success: boolean; data: CrmStats }>(cacheKey);
+  if (cached) {
+    return NextResponse.json(cached, { headers: { 'X-Cache': 'HIT' } });
   }
 
   try {
@@ -66,6 +77,58 @@ export async function GET() {
       ? Math.round(ciclos.reduce((a, b) => a + b, 0) / ciclos.length)
       : 0;
 
+    // Forecast = pipeline value × tasa de cierre histórica
+    const forecast = Math.round(pipelineTotal * (tasaCierre / 100));
+
+    // ─── Ranking de asesores ───────────────────────────────────────────────
+    const asesorMap = new Map<number, AsesorStats>();
+
+    for (const lead of leads) {
+      if (!lead.Usuario_Id) continue;
+      if (!asesorMap.has(lead.Usuario_Id)) {
+        asesorMap.set(lead.Usuario_Id, {
+          id: lead.Usuario_Id,
+          nombre: lead.Usuario_Nombre || `Asesor ${lead.Usuario_Id}`,
+          activos: 0,
+          ganados: 0,
+          perdidos: 0,
+          revenue: 0,
+          tasa_cierre: 0,
+        });
+      }
+      const a = asesorMap.get(lead.Usuario_Id)!;
+      if (lead.Estado === 'abierto')  a.activos++;
+      if (lead.Estado === 'ganado')  { a.ganados++; a.revenue += Number(lead.Valor_Estimado) || 0; }
+      if (lead.Estado === 'perdido')   a.perdidos++;
+    }
+
+    const rankingAsesores: AsesorStats[] = [...asesorMap.values()].map((a) => {
+      const tot = a.ganados + a.perdidos;
+      return { ...a, tasa_cierre: tot > 0 ? Math.round((a.ganados / tot) * 100) : 0 };
+    }).sort((a, b) => b.revenue - a.revenue);
+
+    // ─── Distribución por etapa (leads abiertos) ──────────────────────────
+    const stageMap = new Map<number, StageStats>();
+
+    for (const lead of abiertos) {
+      if (!lead.Stage_Id) continue;
+      if (!stageMap.has(lead.Stage_Id)) {
+        stageMap.set(lead.Stage_Id, {
+          id: lead.Stage_Id,
+          nombre: lead.Stage_Nombre || `Etapa ${lead.Stage_Id}`,
+          color: lead.Stage_Color || '#6366f1',
+          count: 0,
+          valor_total: 0,
+        });
+      }
+      const s = stageMap.get(lead.Stage_Id)!;
+      s.count++;
+      s.valor_total += Number(lead.Valor_Estimado) || 0;
+    }
+
+    const distribucionEtapas: StageStats[] = [...stageMap.values()]
+      .sort((a, b) => b.valor_total - a.valor_total);
+
     const stats: CrmStats = {
       leads_total:          leads.length,
       leads_abiertos:       abiertos.length,
@@ -78,9 +141,14 @@ export async function GET() {
       ticket_promedio:      ticketPromedio,
       leads_sin_actividad:  leadsSinActividad,
       ciclo_promedio_dias:  cicloPromedio,
+      forecast,
+      ranking_asesores:     rankingAsesores,
+      distribucion_etapas:  distribucionEtapas,
     };
 
-    return NextResponse.json({ success: true, data: stats });
+    const response = { success: true, data: stats };
+    await cacheSet(cacheKey, response, CacheTTL.CRM_STATS);
+    return NextResponse.json(response, { headers: { 'X-Cache': 'MISS' } });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     return NextResponse.json({ success: false, data: null, error: msg }, { status: 500 });

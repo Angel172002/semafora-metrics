@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import Header from '@/components/Header';
 import KpiCard from '@/components/KpiCard';
 import DailyPerformanceChart from '@/components/DailyPerformanceChart';
@@ -12,12 +12,17 @@ import AdSetsTable from '@/components/AdSetsTable';
 import AdsTable from '@/components/AdsTable';
 import NetworkBreakdownChart from '@/components/NetworkBreakdownChart';
 import SettingsModal from '@/components/SettingsModal';
+import ConversionFunnelChart from '@/components/ConversionFunnelChart';
+import WeeklyHeatmap from '@/components/WeeklyHeatmap';
+import PeriodComparisonChart from '@/components/PeriodComparisonChart';
+import AiInsightsPanel from '@/components/AiInsightsPanel';
 import { useMetrics } from '@/hooks/useMetrics';
 import { useTheme } from '@/hooks/useTheme';
-import type { DateRange } from '@/types';
+import type { DateRange, CampaignTableRow } from '@/types';
+import type { CampaignBudget } from '@/app/api/meta/budgets/route';
 import { formatCOP } from '@/lib/format';
 import { LeadIcon, BudgetIcon, ImpressionsIcon, VideoIcon, FollowerIcon, CostIcon, ReachIcon } from '@/components/icons/DashboardIcons';
-import { exportCSV } from '@/lib/export';
+import { exportCSV, exportPDF } from '@/lib/export';
 
 function formatKpiValue(key: string, val: number): string {
   if (key === 'spent') return formatCOP(val, true);
@@ -32,8 +37,31 @@ export default function DashboardPage() {
   const [range, setRange]         = useState<DateRange>('7d');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<DashTab>('campanas');
+  const [budgetMap, setBudgetMap] = useState<Map<string, CampaignBudget>>(new Map());
   const { data, loading, syncing, triggerSync } = useMetrics(range);
   const { isDark, toggle } = useTheme();
+
+  // Fetch Meta campaign budgets once on mount
+  useEffect(() => {
+    fetch('/api/meta/budgets')
+      .then((r) => r.json())
+      .then((res: { success: boolean; data: CampaignBudget[] }) => {
+        if (res.success && res.data?.length) {
+          setBudgetMap(new Map(res.data.map((b) => [b.campaign_id, b])));
+        }
+      })
+      .catch(() => { /* budgets are optional — ignore errors */ });
+  }, []);
+
+  // Merge budgets into campaigns table
+  const campaignsWithBudget = useMemo((): CampaignTableRow[] => {
+    if (!data?.campaignsTable) return [];
+    if (!budgetMap.size) return data.campaignsTable;
+    return data.campaignsTable.map((row) => {
+      const b = budgetMap.get(row.id);
+      return b ? { ...row, budget: b.budget, budget_type: b.budget_type } : row;
+    });
+  }, [data?.campaignsTable, budgetMap]);
 
   const tabs: { key: DashTab; label: string; count?: number }[] = [
     { key: 'campanas',  label: 'Campañas',              count: data?.campaignsTable.length },
@@ -47,6 +75,7 @@ export default function DashboardPage() {
         range={range}
         onRangeChange={setRange}
         onExport={() => exportCSV(data)}
+        onExportPDF={() => exportPDF(data)}
         onSync={triggerSync}
         onSettings={() => setSettingsOpen(true)}
         isSyncing={syncing}
@@ -166,7 +195,27 @@ export default function DashboardPage() {
         {/* ══ SECCIÓN 5: Distribución presupuesto ══ */}
         <BudgetDistributionChart data={data?.platformBudget ?? []} loading={loading} />
 
-        {/* ══ SECCIÓN 6: Tablas detalladas ══ */}
+        {/* ══ SECCIÓN 6: Análisis avanzado (Sprint 3) ══ */}
+        <section className="flex flex-col gap-3">
+          <p className="section-title">Análisis avanzado</p>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <ConversionFunnelChart data={data?.funnelData ?? []} loading={loading} />
+            <PeriodComparisonChart data={data?.periodComparison ?? []} loading={loading} range={range} />
+          </div>
+          <WeeklyHeatmap data={data?.weeklyHeatmap ?? []} loading={loading} />
+        </section>
+
+        {/* ══ SECCIÓN 7: AI Insights ══ */}
+        <section className="flex flex-col gap-3">
+          <p className="section-title">Inteligencia Artificial</p>
+          <AiInsightsPanel
+            campaigns={data?.dailyMetrics ?? []}
+            range={range}
+            crmStats={null}
+          />
+        </section>
+
+        {/* ══ SECCIÓN 8: Tablas detalladas ══ */}
         <section className="flex flex-col gap-3">
           <p className="section-title">Análisis detallado</p>
           <div className="card overflow-hidden">
@@ -196,7 +245,7 @@ export default function DashboardPage() {
 
             {/* Tab content */}
             <div style={{ display: activeTab === 'campanas'  ? 'block' : 'none' }}>
-              <CampaignsTable data={data?.campaignsTable ?? []} loading={loading} />
+              <CampaignsTable data={campaignsWithBudget} loading={loading} />
             </div>
             <div style={{ display: activeTab === 'conjuntos' ? 'block' : 'none' }}>
               <AdSetsTable data={data?.adSetsTable ?? []} loading={loading} />

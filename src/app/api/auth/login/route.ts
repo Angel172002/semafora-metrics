@@ -1,37 +1,54 @@
 import { NextRequest, NextResponse } from 'next/server';
-
-const COOKIE = 'semafora_session';
+import { authenticate } from '@/lib/auth';
+import { signSession, COOKIE_NAME, sessionCookieOptions } from '@/lib/session';
+import { validate, LoginSchema } from '@/lib/validators';
+import { rateLimitAuth, getClientIp } from '@/lib/rateLimit';
+import { audit } from '@/lib/audit';
 
 export async function POST(req: NextRequest) {
-  const { username, password } = await req.json().catch(() => ({}));
+  // Rate limit: 10 attempts per 15 min per IP
+  const { blocked } = rateLimitAuth(req);
+  if (blocked) return blocked;
 
-  const validUser = process.env.DASHBOARD_USER;
-  const validPass = process.env.DASHBOARD_PASSWORD;
-
-  if (!validUser || !validPass) {
-    return NextResponse.json(
-      { error: 'Servidor no configurado. Contacta al administrador.' },
-      { status: 503 }
-    );
+  const body   = await req.json().catch(() => ({}));
+  const result = validate(LoginSchema, body);
+  if (!result.success) {
+    return NextResponse.json({ error: result.error }, { status: 400 });
   }
 
-  if (!username || !password || username !== validUser || password !== validPass) {
-    return NextResponse.json(
-      { error: 'Usuario o contraseña incorrectos' },
-      { status: 401 }
-    );
+  const { username, email, password } = result.data;
+  const identifier = (email ?? username ?? '').trim();
+
+  const userPayload = await authenticate(identifier, password);
+
+  if (!userPayload) {
+    audit({
+      tenantId: 0, userId: 0, userEmail: identifier,
+      action: 'auth.login',
+      ip: getClientIp(req),
+      metadata: { success: false },
+    });
+    return NextResponse.json({ error: 'Usuario o contraseña incorrectos.' }, { status: 401 });
   }
 
-  // Credenciales correctas — establecer cookie de sesión (24 horas)
-  const sessionValue = btoa(`${validUser}:${validPass}`);
-  const response = NextResponse.json({ success: true });
+  const token    = signSession(userPayload);
+  const response = NextResponse.json({
+    success: true,
+    user: {
+      email:         userPayload.email,
+      nombre:        userPayload.nombre,
+      role:          userPayload.role,
+      tenant_nombre: userPayload.tenant_nombre,
+    },
+  });
 
-  response.cookies.set(COOKIE, sessionValue, {
-    httpOnly: true,
-    secure:   process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    maxAge:   60 * 60 * 24,
-    path:     '/',
+  response.cookies.set(COOKIE_NAME, token, sessionCookieOptions());
+
+  audit({
+    tenantId: userPayload.tenant_id, userId: userPayload.sub, userEmail: userPayload.email,
+    action: 'auth.login',
+    ip: getClientIp(req),
+    metadata: { success: true, role: userPayload.role },
   });
 
   return response;

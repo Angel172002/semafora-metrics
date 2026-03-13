@@ -12,7 +12,12 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ success: false, data: [], error: 'CRM Activities table not configured.' }, { status: 503 });
   }
   const { searchParams } = new URL(req.url);
-  const leadId = searchParams.get('leadId');
+  const leadIdRaw = searchParams.get('leadId');
+  const leadId    = leadIdRaw && /^\d+$/.test(leadIdRaw) ? leadIdRaw : null;
+
+  if (leadIdRaw && !leadId) {
+    return NextResponse.json({ success: false, data: [], error: 'leadId inválido' }, { status: 400 });
+  }
 
   try {
     const params: Record<string, string> = { sort: '-Fecha' };
@@ -46,13 +51,17 @@ export async function POST(req: NextRequest) {
       Proxima_Accion_Nota:  body.Proxima_Accion_Nota  || '',
     });
 
-    // Update Fecha_Ultimo_Contacto on the related lead
+    // Update Fecha_Ultimo_Contacto (and optionally Proxima_Accion_Fecha) on the related lead
     if (body.Lead_Id && TABLE_LEADS) {
-      const updateData: Partial<CrmLead> = { Fecha_Ultimo_Contacto: now } as Partial<CrmLead>;
-      if (body.Proxima_Accion_Fecha) {
-        updateData.Proxima_Accion_Fecha = body.Proxima_Accion_Fecha;
+      const updateData: Record<string, unknown> = { Fecha_Ultimo_Contacto: now };
+      if (body.Proxima_Accion_Fecha) updateData.Proxima_Accion_Fecha = body.Proxima_Accion_Fecha;
+      if (body.Proxima_Accion_Nota)  updateData.Proxima_Accion_Nota  = body.Proxima_Accion_Nota;
+      try {
+        await updateRow<CrmLead>(PROJECT, TABLE_LEADS, Number(body.Lead_Id), updateData as Partial<CrmLead>);
+      } catch (updateErr) {
+        // Activity was saved — only log the lead update failure, don't fail the request
+        console.warn('[activities] Failed to update lead contact date:', updateErr);
       }
-      await updateRow<CrmLead>(PROJECT, TABLE_LEADS, Number(body.Lead_Id), updateData).catch(console.warn);
     }
 
     return NextResponse.json({ success: true, data: row }, { status: 201 });

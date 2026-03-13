@@ -7,7 +7,6 @@ import {
   Cell,
   Tooltip,
   ResponsiveContainer,
-  Legend,
 } from 'recharts';
 import type { PlatformBudget } from '@/types';
 
@@ -32,28 +31,6 @@ function CustomTooltip({ active, payload }: any) {
   );
 }
 
-function renderCustomLabel({ cx, cy, midAngle, innerRadius, outerRadius, percentage, label }: any) {
-  if (percentage < 8) return null;
-  const RADIAN = Math.PI / 180;
-  const radius = innerRadius + (outerRadius - innerRadius) * 0.5 + 28;
-  const x = cx + radius * Math.cos(-midAngle * RADIAN);
-  const y = cy + radius * Math.sin(-midAngle * RADIAN);
-  const shortLabel = label.replace(' Ads', '').replace('Google', 'Google').substring(0, 12);
-
-  return (
-    <text
-      x={x}
-      y={y}
-      fill="var(--muted)"
-      textAnchor={x > cx ? 'start' : 'end'}
-      dominantBaseline="central"
-      fontSize={11}
-    >
-      {shortLabel} {percentage}%
-    </text>
-  );
-}
-
 export default function BudgetDistributionChart({ data, loading }: Props) {
   if (loading) {
     return (
@@ -63,6 +40,8 @@ export default function BudgetDistributionChart({ data, loading }: Props) {
       </div>
     );
   }
+
+  const totalSpent = data.reduce((s, d) => s + d.spent, 0);
 
   return (
     <div className="card p-5">
@@ -75,27 +54,59 @@ export default function BudgetDistributionChart({ data, loading }: Props) {
             d="M12 6v12m-3-2.818l.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33" />
         </svg>
       </div>
-      <ResponsiveContainer width="100%" height={220}>
-        <PieChart>
-          <Pie
-            data={data}
-            cx="50%"
-            cy="50%"
-            innerRadius={45}
-            outerRadius={80}
-            paddingAngle={2}
-            dataKey="spent"
-            nameKey="label"
-            labelLine={false}
-            label={(props) => renderCustomLabel({ ...props, label: props.payload.label, percentage: props.payload.percentage })}
-          >
-            {data.map((entry, index) => (
-              <Cell key={`cell-${index}`} fill={entry.color} />
-            ))}
-          </Pie>
-          <Tooltip content={<CustomTooltip />} />
-        </PieChart>
-      </ResponsiveContainer>
+
+      {/* Chart + center label */}
+      <div className="relative">
+        <ResponsiveContainer width="100%" height={200}>
+          <PieChart>
+            <Pie
+              data={data}
+              cx="50%"
+              cy="50%"
+              innerRadius={52}
+              outerRadius={82}
+              paddingAngle={3}
+              dataKey="spent"
+              nameKey="label"
+              strokeWidth={0}
+            >
+              {data.map((entry, index) => (
+                <Cell key={`cell-${index}`} fill={entry.color} />
+              ))}
+            </Pie>
+            <Tooltip content={<CustomTooltip />} />
+          </PieChart>
+        </ResponsiveContainer>
+        {/* Center label */}
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <div className="text-center">
+            <p className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: 'var(--muted)' }}>Total</p>
+            <p className="text-sm font-bold font-mono leading-tight" style={{ color: 'var(--text)' }}>
+              {formatCOPFull(totalSpent)}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Legend */}
+      <div className="flex flex-col gap-2 mt-3 pt-3 border-t" style={{ borderColor: 'var(--border)' }}>
+        {data.map((item) => (
+          <div key={item.platform} className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: item.color }} />
+              <span className="text-xs font-medium" style={{ color: 'var(--text)' }}>{item.label}</span>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="text-xs font-mono font-semibold" style={{ color: item.color }}>
+                {item.percentage}%
+              </span>
+              <span className="text-xs font-mono" style={{ color: 'var(--muted)' }}>
+                {formatCOPFull(item.spent)}
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

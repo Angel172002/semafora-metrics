@@ -7,6 +7,10 @@ import KpiCard from '@/components/KpiCard';
 import type { DateRange } from '@/types';
 import { formatCOP } from '@/lib/format';
 import { useTheme } from '@/hooks/useTheme';
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
+  ResponsiveContainer, PieChart, Pie, Cell, Legend,
+} from 'recharts';
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
 const LikesIcon = () => (
@@ -59,6 +63,32 @@ const RANGE_LABELS: Record<DateRange, string> = {
   'all': 'Todo el historial',
 };
 
+const PLATFORM_COLORS: Record<string, string> = {
+  meta: '#1877F2', google: '#4285F4', tiktok: '#FF0050',
+  instagram: '#E1306C', linkedin: '#0A66C2',
+};
+const PLATFORM_LABELS: Record<string, string> = {
+  meta: 'Meta', google: 'Google', tiktok: 'TikTok',
+  instagram: 'Instagram', linkedin: 'LinkedIn',
+};
+
+function EngagementTooltip({ active, payload, label }: any) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="custom-tooltip text-xs">
+      <p className="font-semibold mb-1" style={{ color: 'var(--text)' }}>{label}</p>
+      {payload.map((p: any) => (
+        <div key={p.dataKey} className="flex justify-between gap-3">
+          <span style={{ color: p.color }}>{p.name}</span>
+          <span className="font-mono font-bold" style={{ color: p.color }}>
+            {p.value.toLocaleString('es-CO')}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function EngagementPage() {
   const [range, setRange] = useState<DateRange>('7d');
   const { data, loading, syncing, triggerSync } = useMetrics(range);
@@ -69,6 +99,36 @@ export default function EngagementPage() {
   const totalComments   = table.reduce((s, r) => s + r.comments, 0);
   const totalVideoViews = table.reduce((s, r) => s + r.video_views, 0);
   const totalSpent      = table.reduce((s, r) => s + r.spent, 0);
+
+  // Chart data: top 6 campaigns by total engagement
+  const chartData = [...table]
+    .filter((r) => r.likes + r.comments + r.shares + r.video_views > 0)
+    .sort((a, b) => (b.likes + b.comments + b.video_views) - (a.likes + a.comments + a.video_views))
+    .slice(0, 6)
+    .map((r) => ({
+      name: r.name.length > 20 ? r.name.substring(0, 18) + '…' : r.name,
+      Likes: r.likes,
+      Comentarios: r.comments,
+      'Video Views': r.video_views,
+    }));
+
+  // Platform breakdown (pie)
+  const platformMap: Record<string, number> = {};
+  for (const r of table) {
+    if (r.likes + r.comments + r.shares + r.video_views > 0) {
+      platformMap[r.platform] = (platformMap[r.platform] || 0) + r.likes + r.comments + r.shares;
+    }
+  }
+  const platTotal = Object.values(platformMap).reduce((s, v) => s + v, 0);
+  const platformPie = Object.entries(platformMap)
+    .filter(([, v]) => v > 0)
+    .map(([k, v]) => ({
+      platform: k,
+      label: PLATFORM_LABELS[k] || k,
+      color: PLATFORM_COLORS[k] || '#6b7280',
+      value: v,
+      pct: platTotal > 0 ? Math.round((v / platTotal) * 100) : 0,
+    }));
 
   return (
     <div className="min-h-screen flex flex-col" style={{ background: 'var(--bg)' }}>
@@ -182,10 +242,120 @@ export default function EngagementPage() {
               loading={loading}
             />
           </div>
-          <p className="text-xs mt-2 px-0.5" style={{ color: 'var(--muted)' }}>
-            💡 "Invertido" = campo "Importe Gastado" de Meta Ads · valor exacto de la API en COP
-          </p>
         </div>
+
+        {/* ── Charts ── */}
+        {!loading && chartData.length > 0 && (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+
+            {/* BarChart: engagement por campaña */}
+            <div className="card p-5 lg:col-span-2">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="font-semibold text-sm" style={{ color: 'var(--text)' }}>
+                    Engagement por Campaña
+                  </h3>
+                  <p className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>
+                    Top campañas por interacciones totales
+                  </p>
+                </div>
+              </div>
+              <ResponsiveContainer width="100%" height={220}>
+                <BarChart data={chartData} margin={{ top: 0, right: 0, bottom: 0, left: 0 }} barSize={14}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                  <XAxis
+                    dataKey="name"
+                    tick={{ fill: 'var(--muted)', fontSize: 10 }}
+                    axisLine={false}
+                    tickLine={false}
+                  />
+                  <YAxis
+                    tick={{ fill: 'var(--muted)', fontSize: 10 }}
+                    axisLine={false}
+                    tickLine={false}
+                    tickFormatter={(v) => v >= 1000 ? `${Math.round(v / 1000)}K` : v}
+                    width={36}
+                  />
+                  <Tooltip content={<EngagementTooltip />} />
+                  <Bar dataKey="Likes" fill="#ec4899" radius={[3, 3, 0, 0]} />
+                  <Bar dataKey="Comentarios" fill="#8b5cf6" radius={[3, 3, 0, 0]} />
+                  <Bar dataKey="Video Views" fill="#f59e0b" radius={[3, 3, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+              {/* Legend */}
+              <div className="flex items-center gap-4 mt-3 pt-2 border-t" style={{ borderColor: 'var(--border)' }}>
+                {[
+                  { color: '#ec4899', label: 'Likes' },
+                  { color: '#8b5cf6', label: 'Comentarios' },
+                  { color: '#f59e0b', label: 'Video Views' },
+                ].map((l) => (
+                  <div key={l.label} className="flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-sm flex-shrink-0" style={{ background: l.color }} />
+                    <span className="text-[11px]" style={{ color: 'var(--muted)' }}>{l.label}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Pie: desglose por plataforma */}
+            <div className="card p-5">
+              <div className="mb-4">
+                <h3 className="font-semibold text-sm" style={{ color: 'var(--text)' }}>
+                  Por Plataforma
+                </h3>
+                <p className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>
+                  Distribución de interacciones
+                </p>
+              </div>
+              {platformPie.length > 0 ? (
+                <>
+                  <ResponsiveContainer width="100%" height={150}>
+                    <PieChart>
+                      <Pie
+                        data={platformPie}
+                        dataKey="value"
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={40}
+                        outerRadius={65}
+                        paddingAngle={3}
+                        strokeWidth={0}
+                      >
+                        {platformPie.map((entry) => (
+                          <Cell key={entry.platform} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip
+                        formatter={(v: number, name) => [v.toLocaleString('es-CO'), name]}
+                        contentStyle={{
+                          background: 'var(--surface2)', border: '1px solid var(--border)',
+                          borderRadius: 8, fontSize: 11,
+                        }}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <div className="flex flex-col gap-2 mt-3">
+                    {platformPie.map((p) => (
+                      <div key={p.platform} className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="w-2 h-2 rounded-full" style={{ background: p.color }} />
+                          <span className="text-xs" style={{ color: 'var(--text)' }}>{p.label}</span>
+                        </div>
+                        <span className="text-xs font-bold font-mono" style={{ color: p.color }}>
+                          {p.pct}%
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <p className="text-xs text-center py-8" style={{ color: 'var(--muted)' }}>
+                  Sin datos de plataforma
+                </p>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* ── Engagement table ── */}
         <EngagementTable data={table} loading={loading} />

@@ -21,6 +21,9 @@ import type {
   CampaignStatus,
   EngagementTableRow,
   FollowerTableRow,
+  FunnelStep,
+  HeatmapDay,
+  PeriodComparisonItem,
 } from '@/types';
 import { LEAD_RESULT_TYPES, VIDEO_RESULT_TYPES, FOLLOWER_RESULT_TYPES } from '@/lib/constants';
 
@@ -301,7 +304,8 @@ function buildCampaignsTable(metrics: DailyMetric[]): CampaignTableRow[] {
   const grouped: Record<string, CampaignTableRow> = {};
 
   for (const m of metrics) {
-    const key = `${m.campaign_name}__${m.platform}`;
+    // Group by campaign_id (not name) so same-named campaigns from different accounts stay separate
+    const key = `${m.campaign_id}__${m.platform}`;
     if (!grouped[key]) {
       grouped[key] = {
         id: m.campaign_id,
@@ -498,6 +502,8 @@ function buildEngagementTable(metrics: DailyMetric[]): EngagementTableRow[] {
 
   return Array.from(grouped.values())
     .map((r) => ({ ...r, spent: parseFloat(r.spent.toFixed(2)) }))
+    // Only show campaigns that actually have engagement data
+    .filter((r) => r.likes + r.comments + r.shares + r.video_views > 0)
     .sort((a, b) =>
       (b.likes + b.comments + b.video_views) - (a.likes + a.comments + a.video_views) ||
       b.spent - a.spent
@@ -509,32 +515,118 @@ function buildFollowerTable(metrics: DailyMetric[]): FollowerTableRow[] {
   const grouped = new Map<string, FollowerTableRow>();
 
   for (const m of metrics) {
-    if (!FOLLOWER_RESULT_TYPES.has(m.result_type)) continue;
+    // Use result count when result_type is a follower type (dedicated follower campaign)
+    // Otherwise fall back to the `likes` field which captures page_like/follow/post_reaction
+    const isFollowerResult = FOLLOWER_RESULT_TYPES.has(m.result_type);
+    const followerCount = isFollowerResult ? m.results : (m.likes ?? 0);
+
+    // Skip rows with no follower activity at all
+    if (followerCount === 0) continue;
+
     if (!grouped.has(m.campaign_id)) {
       grouped.set(m.campaign_id, {
         id: m.campaign_id,
         name: m.campaign_name,
         platform: m.platform,
-        result_type: m.result_type,
+        result_type: isFollowerResult ? m.result_type : 'like',
         followers_gained: 0, reach: 0, impressions: 0,
         spent: 0, cost_per_follower: 0,
       });
     }
     const row = grouped.get(m.campaign_id)!;
-    row.followers_gained += m.results;
+    row.followers_gained += followerCount;
     row.reach            += m.reach;
     row.impressions      += m.impressions;
-    row.spent            += m.spent;
+    // Only attribute spend to follower campaigns with dedicated follower objective
+    // For mixed campaigns just track the count (spend is already in lead campaigns)
+    if (isFollowerResult) row.spent += m.spent;
   }
 
   return Array.from(grouped.values())
     .map((r) => ({
       ...r,
       spent:             parseFloat(r.spent.toFixed(2)),
-      cost_per_follower: r.followers_gained > 0
+      cost_per_follower: r.followers_gained > 0 && r.spent > 0
         ? parseFloat((r.spent / r.followers_gained).toFixed(2)) : 0,
     }))
     .sort((a, b) => b.followers_gained - a.followers_gained);
+}
+
+// ─── Funnel data ──────────────────────────────────────────────────────────────
+function buildFunnelData(current: DailyMetric[]): FunnelStep[] {
+  const impressions = sumF(current, 'impressions');
+  const reach       = sumF(current, 'reach');
+  const clicks      = sumF(current, 'clicks');
+  const results     = sumF(current, 'results');
+
+  const steps = [
+    { label: 'Impresiones', value: impressions, color: '#6366f1' },
+    { label: 'Alcance',     value: reach,       color: '#3b82f6' },
+    { label: 'Clics',       value: clicks,      color: '#14b8a6' },
+    { label: 'Resultados',  value: results,     color: '#4ade80' },
+  ];
+
+  return steps.map((s, i) => ({
+    ...s,
+    pct:     impressions > 0 ? parseFloat((s.value / impressions * 100).toFixed(1)) : 0,
+    dropOff: i === 0 ? 0 : steps[i - 1].value > 0
+      ? parseFloat(((1 - s.value / steps[i - 1].value) * 100).toFixed(1))
+      : 0,
+  }));
+}
+
+// ─── Weekly heatmap ────────────────────────────────────────────────────────────
+function buildWeeklyHeatmap(current: DailyMetric[]): HeatmapDay[] {
+  const DAYS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+  const grouped: Record<number, { spent: number; results: number; clicks: number }> = {};
+
+  for (const m of current) {
+    const d = new Date(m.date + 'T00:00:00').getDay();
+    if (!grouped[d]) grouped[d] = { spent: 0, results: 0, clicks: 0 };
+    grouped[d].spent   += m.spent;
+    grouped[d].results += m.results;
+    grouped[d].clicks  += m.clicks;
+  }
+
+  const maxSpent   = Math.max(...Object.values(grouped).map((v) => v.spent),   1);
+  const maxResults = Math.max(...Object.values(grouped).map((v) => v.results), 1);
+
+  // Week order: Mon → Sun
+  return [1, 2, 3, 4, 5, 6, 0].map((dayIndex) => ({
+    day:              DAYS[dayIndex],
+    dayIndex,
+    spent:            grouped[dayIndex]?.spent   ?? 0,
+    results:          grouped[dayIndex]?.results ?? 0,
+    clicks:           grouped[dayIndex]?.clicks  ?? 0,
+    spentIntensity:   grouped[dayIndex] ? grouped[dayIndex].spent   / maxSpent   : 0,
+    resultsIntensity: grouped[dayIndex] ? grouped[dayIndex].results / maxResults : 0,
+  }));
+}
+
+// ─── Period comparison ─────────────────────────────────────────────────────────
+function buildPeriodComparison(current: DailyMetric[], previous: DailyMetric[]): PeriodComparisonItem[] {
+  const c = {
+    spent:       sumF(current,  'spent'),
+    clicks:      sumF(current,  'clicks'),
+    impressions: sumF(current,  'impressions'),
+    results:     sumF(current,  'results'),
+    reach:       sumF(current,  'reach'),
+  };
+  const p = {
+    spent:       sumF(previous, 'spent'),
+    clicks:      sumF(previous, 'clicks'),
+    impressions: sumF(previous, 'impressions'),
+    results:     sumF(previous, 'results'),
+    reach:       sumF(previous, 'reach'),
+  };
+
+  return [
+    { label: 'Invertido',    current: c.spent,       previous: p.spent,       isMonetary: true  },
+    { label: 'Resultados',   current: c.results,      previous: p.results,     isMonetary: false },
+    { label: 'Clics',        current: c.clicks,       previous: p.clicks,      isMonetary: false },
+    { label: 'Impresiones',  current: c.impressions,  previous: p.impressions, isMonetary: false },
+    { label: 'Alcance',      current: c.reach,        previous: p.reach,       isMonetary: false },
+  ].map((item) => ({ ...item, change: pctChange(item.current, item.previous) }));
 }
 
 // ─── Main transform ───────────────────────────────────────────────────────────
@@ -566,6 +658,10 @@ export function transformToDashboard(
     networkBreakdown: buildNetworkBreakdown(curAdSets),
     engagementTable:  buildEngagementTable(current),
     followerTable:    buildFollowerTable(current),
+    funnelData:       buildFunnelData(current),
+    weeklyHeatmap:    buildWeeklyHeatmap(current),
+    periodComparison: buildPeriodComparison(current, previous),
+    dailyMetrics:     current,
     lastSync,
     isMockData: false,
   };

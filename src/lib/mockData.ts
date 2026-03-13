@@ -224,6 +224,10 @@ export function getMockDashboardData(range: '7d' | '30d' | '90d'): DashboardData
     networkBreakdown: NETWORK_BREAKDOWN,
     engagementTable:  TABLE_ENGAGEMENT,
     followerTable:    TABLE_FOLLOWERS,
+    funnelData:       [],
+    weeklyHeatmap:    [],
+    periodComparison: [],
+    dailyMetrics:     [],
     lastSync:         new Date(Date.now() - 1000 * 60 * 23).toISOString(),
     isMockData:       true,
   };

@@ -143,6 +143,82 @@ export async function notifyNewLeads(leads: LeadNotification[]): Promise<void> {
   ]);
 }
 
+// ─── Daily Summary Notification ───────────────────────────────────────────────
+
+export interface DailySummary {
+  date: string;               // YYYY-MM-DD
+  platforms: string[];
+  totalRecords: number;
+  crmLeadsCreated: number;
+  errors: string[];
+}
+
+function formatDailySummaryWa(s: DailySummary): string {
+  const lines = [
+    `📊 *Resumen diario Semáfora Metrics — ${s.date}*`,
+    '',
+    `📡 Plataformas sincronizadas: ${s.platforms.length > 0 ? s.platforms.join(', ') : 'ninguna'}`,
+    `📦 Registros procesados: ${s.totalRecords.toLocaleString('es-CO')}`,
+    s.crmLeadsCreated > 0 ? `🆕 Leads importados al CRM: ${s.crmLeadsCreated}` : '',
+    s.errors.length > 0 ? `⚠️ Errores: ${s.errors.join(' | ')}` : '✅ Sin errores',
+    '',
+    '_Accede al dashboard para ver los datos actualizados._',
+  ];
+  return lines.filter((l) => l !== undefined).join('\n');
+}
+
+/**
+ * Send a daily sync summary via all configured channels.
+ * Fire-and-forget: errors are logged but never thrown.
+ */
+export async function notifyDailySummary(summary: DailySummary): Promise<void> {
+  const webhookUrl = process.env.NOTIFY_WEBHOOK_URL;
+  const phoneId    = process.env.NOTIFY_WA_PHONE_NUMBER_ID;
+  const token      = process.env.NOTIFY_WA_ACCESS_TOKEN;
+  const recipients = process.env.NOTIFY_WA_TO;
+
+  const tasks: Promise<void>[] = [];
+
+  if (webhookUrl) {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    const secret = process.env.NOTIFY_WEBHOOK_SECRET;
+    if (secret) headers['Authorization'] = `Bearer ${secret}`;
+
+    tasks.push(
+      fetch(webhookUrl, {
+        method:  'POST',
+        headers,
+        body:    JSON.stringify({ event: 'daily_summary', timestamp: new Date().toISOString(), ...summary }),
+        signal:  AbortSignal.timeout(8000),
+      })
+        .then((r) => { console.log(`[notify] ✓ Daily summary webhook sent → ${r.status}`); })
+        .catch((e) => { console.warn('[notify] Daily summary webhook error:', e); })
+    );
+  }
+
+  if (phoneId && token && recipients) {
+    const message = formatDailySummaryWa(summary);
+    const toList  = recipients.split(',').map((p) => p.trim()).filter(Boolean);
+    const version = process.env.META_API_VERSION || 'v19.0';
+    const url     = `https://graph.facebook.com/${version}/${phoneId}/messages`;
+
+    for (const to of toList) {
+      tasks.push(
+        fetch(url, {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body:    JSON.stringify({ messaging_product: 'whatsapp', to, type: 'text', text: { body: message } }),
+          signal:  AbortSignal.timeout(8000),
+        })
+          .then((r) => { console.log(`[notify] ✓ Daily summary WhatsApp sent to ${to} → ${r.status}`); })
+          .catch((e) => { console.warn(`[notify] Daily summary WhatsApp error for ${to}:`, e); })
+      );
+    }
+  }
+
+  if (tasks.length > 0) await Promise.allSettled(tasks);
+}
+
 export function isNotifyConfigured(): boolean {
   return !!(
     process.env.NOTIFY_WEBHOOK_URL ||

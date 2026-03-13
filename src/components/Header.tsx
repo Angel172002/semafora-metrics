@@ -7,6 +7,7 @@ interface Props {
   range: DateRange;
   onRangeChange: (r: DateRange) => void;
   onExport: () => void;
+  onExportPDF?: () => void;
   onSync: () => void;
   onSettings: () => void;
   isSyncing: boolean;
@@ -34,7 +35,7 @@ const PAGE_TITLES: Record<string, { label: string; sub: string }> = {
 };
 
 export default function Header({
-  range, onRangeChange, onExport, onSync, onSettings,
+  range, onRangeChange, onExport, onExportPDF, onSync, onSettings,
   isSyncing, lastSync, isMockData, isDark, onToggleTheme,
 }: Props) {
   const pathname = usePathname();
@@ -146,7 +147,7 @@ export default function Header({
             </svg>
           </button>
 
-          {/* Export */}
+          {/* Export CSV */}
           <button
             onClick={onExport}
             className="btn hidden sm:inline-flex"
@@ -156,8 +157,24 @@ export default function Header({
             <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
               <path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
             </svg>
-            Exportar
+            CSV
           </button>
+
+          {/* Export PDF */}
+          {onExportPDF && (
+            <button
+              onClick={onExportPDF}
+              className="btn hidden sm:inline-flex"
+              style={{ background: 'rgba(239,68,68,0.12)', color: '#fca5a5', border: '1px solid rgba(239,68,68,0.2)', fontSize: 12 }}
+              title="Exportar PDF / Imprimir"
+            >
+              <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2"/>
+                <rect x="6" y="14" width="12" height="8"/>
+              </svg>
+              PDF
+            </button>
+          )}
 
           {/* Settings */}
           <button

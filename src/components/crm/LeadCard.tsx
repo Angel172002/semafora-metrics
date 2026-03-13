@@ -3,6 +3,7 @@
 import { CrmLead } from '@/types';
 import { formatCOP } from '@/lib/format';
 import { ORIGIN_COLOR, ACTIVITY_ICONS, ACTIVITY_TYPES } from '@/lib/crmConstants';
+import { calculateQuickScore } from '@/lib/leadScoring';
 
 interface Props {
   lead: CrmLead;
@@ -48,6 +49,10 @@ export default function LeadCard({ lead, onClick }: Props) {
   const actCount    = lead.activity_count ?? 0;
   const hasPhone    = !!(lead.Telefono && lead.Telefono.trim());
   const leadId      = `#SEM-${String(lead.Id).padStart(3, '0')}`;
+
+  const { score, label } = calculateQuickScore(lead);
+  const scoreEmoji = label === 'listo' ? '🎯' : label === 'caliente' ? '🔥' : label === 'tibio' ? '🌡️' : '❄️';
+  const scoreColor = label === 'listo' ? '#10b981' : label === 'caliente' ? '#f97316' : label === 'tibio' ? '#fbbf24' : '#60a5fa';
 
   return (
     <div
@@ -205,14 +210,16 @@ export default function LeadCard({ lead, onClick }: Props) {
         </div>
       ) : null}
 
-      {/* ── Footer: fechas + detalle ── */}
+      {/* ── Footer: score + detalle ── */}
       <div className="flex items-center justify-between pt-1.5 border-t" style={{ borderColor: 'var(--border)' }}>
-        <div className="flex items-center gap-2">
-          {lead.Fecha_Inicio && (
-            <span className="text-[10px]" style={{ color: 'var(--muted2)' }}>
-              Inicio {formatDate(lead.Fecha_Inicio)}
-            </span>
-          )}
+        {/* Score badge */}
+        <div
+          className="flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold"
+          style={{ background: `${scoreColor}15`, color: scoreColor, border: `1px solid ${scoreColor}30` }}
+          title={`Score: ${score}/100`}
+        >
+          <span>{scoreEmoji}</span>
+          <span>{score}</span>
         </div>
         <a
           href={`/crm/leads/${lead.Id}`}

@@ -48,7 +48,7 @@ type CrmAction =
   | { type: 'KANBAN_LOADING' }
   | { type: 'KANBAN_LOADED'; leads: CrmLead[] }
   | { type: 'KANBAN_ERROR'; error: string }
-  | { type: 'KANBAN_UPDATE_LEAD'; leadId: number; stageId: number; stageName: string; stageColor: string }
+  | { type: 'KANBAN_UPDATE_LEAD'; leadId: number; stageId: number; stageName: string; stageColor: string; estado: CrmLeadStatus }
   | { type: 'LIST_LOADING' }
   | { type: 'LIST_LOADED'; leads: CrmLead[]; page: number; total: number; pages: number }
   | { type: 'LIST_SET_SEARCH'; search: string }
@@ -89,7 +89,7 @@ function crmReducer(state: CrmState, action: CrmAction): CrmState {
         ...state,
         kanbanLeads: state.kanbanLeads.map((l) =>
           Number(l.Id) === action.leadId
-            ? { ...l, Stage_Id: action.stageId, Stage_Nombre: action.stageName, Stage_Color: action.stageColor }
+            ? { ...l, Stage_Id: action.stageId, Stage_Nombre: action.stageName, Stage_Color: action.stageColor, Estado: action.estado }
             : l
         ),
       };
@@ -235,12 +235,13 @@ export default function CrmPage() {
   const handleStageDrop = useCallback(async (leadId: number, newStageId: number) => {
     const stage = stages.find((s) => Number(s.Id) === Number(newStageId));
     if (!stage) return;
-    dispatch({ type: 'KANBAN_UPDATE_LEAD', leadId, stageId: newStageId, stageName: stage.Nombre, stageColor: stage.Color });
+    const estado: CrmLeadStatus = stage.Es_Ganado ? 'ganado' : stage.Es_Perdido ? 'perdido' : 'abierto';
+    dispatch({ type: 'KANBAN_UPDATE_LEAD', leadId, stageId: newStageId, stageName: stage.Nombre, stageColor: stage.Color, estado });
     try {
       const res = await fetch(`/api/crm/leads/${leadId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ Stage_Id: newStageId }),
+        body: JSON.stringify({ Stage_Id: newStageId, Estado: estado }),
       });
       if (!res.ok) fetchKanban();
     } catch { fetchKanban(); }

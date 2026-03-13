@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, FormEvent, Suspense } from 'react';
+import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 function LoginForm() {
@@ -255,13 +256,30 @@ function LoginForm() {
           </button>
         </form>
 
-        {/* Footer */}
+        {/* Registro */}
         <p style={{
-          textAlign: 'center', fontSize: '11px',
-          color: 'var(--muted2)', marginTop: '28px',
+          textAlign: 'center', fontSize: '13px',
+          color: 'var(--muted)', marginTop: '22px',
         }}>
-          © 2026 Semafora · Todos los derechos reservados
+          ¿No tienes cuenta?{' '}
+          <Link href="/register" style={{ color: '#e20613', textDecoration: 'none', fontWeight: 600 }}>
+            Regístrate gratis
+          </Link>
         </p>
+
+        {/* Footer */}
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          gap: '12px', marginTop: '16px',
+        }}>
+          <Link href="/landing" style={{ fontSize: '11px', color: 'var(--muted2)', textDecoration: 'none' }}>
+            Ver planes
+          </Link>
+          <span style={{ color: 'var(--border)', fontSize: '11px' }}>·</span>
+          <p style={{ fontSize: '11px', color: 'var(--muted2)', margin: 0 }}>
+            © 2026 Semafora
+          </p>
+        </div>
       </div>
 
       <style>{`
